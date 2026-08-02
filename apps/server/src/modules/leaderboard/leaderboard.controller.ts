@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Body, Query, HttpCode, HttpException, HttpStatus } from '@nestjs/common';
-import type { LeaderboardService } from './leaderboard.service';
+import { LeaderboardService } from './leaderboard.service';
 import type { LeaderboardPeriod } from '@draw-guess/shared';
 
 interface LeaderboardQueryDto {
@@ -15,7 +15,7 @@ interface SubmitResultDto {
   won: boolean;
 }
 
-@Controller('api/leaderboard')
+@Controller('leaderboard')
 export class LeaderboardController {
   constructor(private readonly service: LeaderboardService) {}
 

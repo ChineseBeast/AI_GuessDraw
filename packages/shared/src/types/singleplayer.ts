@@ -1,4 +1,4 @@
-import type { Difficulty } from './game';
+import type { Difficulty } from './game.js';
 
 /** 游戏阶段 */
 export type GamePhase =

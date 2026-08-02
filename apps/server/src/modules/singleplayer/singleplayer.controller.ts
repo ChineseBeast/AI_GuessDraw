@@ -1,5 +1,5 @@
 import { Controller, Post, Body, HttpCode, HttpException, HttpStatus } from '@nestjs/common';
-import type { SinglePlayerService } from './singleplayer.service';
+import { SinglePlayerService } from './singleplayer.service';
 import type { Difficulty } from '@draw-guess/shared';
 
 interface RecognizeDto {
@@ -13,7 +13,7 @@ interface WordDto {
   excludeWords?: string[];
 }
 
-@Controller('api/singleplayer')
+@Controller('singleplayer')
 export class SinglePlayerController {
   constructor(private readonly service: SinglePlayerService) {}
 

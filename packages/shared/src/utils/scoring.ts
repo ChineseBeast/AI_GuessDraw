@@ -1,4 +1,4 @@
-import { SCORE_RULES } from '../constants/game';
+import { SCORE_RULES } from '../constants/game.js';
 
 /**
  * 格式化分数显示

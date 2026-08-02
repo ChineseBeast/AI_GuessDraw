@@ -1,4 +1,4 @@
-import type { LeaderboardPeriod } from '../types/leaderboard';
+import type { LeaderboardPeriod } from '../types/leaderboard.js';
 
 /** 排行榜默认返回条数 */
 export const DEFAULT_LEADERBOARD_LIMIT = 50;

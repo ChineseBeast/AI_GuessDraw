@@ -6,7 +6,9 @@
     "rootDir": "./src",
     "types": [],
     "declaration": true,
-    "declarationMap": true
+    "declarationMap": true,
+    "module": "Node16",
+    "moduleResolution": "Node16"
   },
   "include": ["src"]
 }

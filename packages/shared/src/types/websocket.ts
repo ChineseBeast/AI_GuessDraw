@@ -1,4 +1,4 @@
-import type { Difficulty, RoomStatus, PlayerRole, ConnectionStatus, GuessProximity, RoundEndReason, LeaveReason } from './game';
+import type { Difficulty, RoomStatus, PlayerRole, ConnectionStatus, GuessProximity, RoundEndReason, LeaveReason } from './game.js';
 
 // ─── Client → Server Payloads ──────────────────────
 

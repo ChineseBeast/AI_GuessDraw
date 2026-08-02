@@ -1,4 +1,4 @@
-import type { GameMode } from './game';
+import type { GameMode } from './game.js';
 
 /** 排行榜周期 */
 export type LeaderboardPeriod = 'weekly' | 'monthly' | 'all';

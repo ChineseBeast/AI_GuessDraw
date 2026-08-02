@@ -13,5 +13,14 @@ export default tseslint.config(
       "@typescript-eslint/explicit-function-return-type": "off",
       "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
     },
+  },
+  {
+    // NestJS DI 依赖 emitDecoratorMetadata，构造函数注入的 provider 必须用值导入，
+    // 否则 reflect-metadata 拿不到运行时类型。consistent-type-imports 不感知
+    // emitDecoratorMetadata，会强制改为 import type 从而破坏依赖注入，故对 server 关闭。
+    files: ["apps/server/src/**/*.ts"],
+    rules: {
+      "@typescript-eslint/consistent-type-imports": "off",
+    },
   }
 );

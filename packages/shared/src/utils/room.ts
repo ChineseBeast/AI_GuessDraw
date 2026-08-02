@@ -1,4 +1,4 @@
-import { INVITE_CODE_LENGTH } from '../constants/game';
+import { INVITE_CODE_LENGTH } from '../constants/game.js';
 
 /** 邀请码字符集（排除容易混淆的 0/O/1/I/l） */
 const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';

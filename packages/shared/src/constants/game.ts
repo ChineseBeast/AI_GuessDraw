@@ -1,4 +1,4 @@
-import type { GameMode, Difficulty } from '../types/game';
+import type { GameMode, Difficulty } from '../types/game.js';
 
 /** 游戏模式列表 */
 export const GAME_MODES: { mode: GameMode; label: string; description: string }[] = [
