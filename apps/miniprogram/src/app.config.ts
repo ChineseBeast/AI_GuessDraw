@@ -1,0 +1,11 @@
+export default {
+  pages: [
+    'pages/index/index',
+  ],
+  window: {
+    backgroundTextStyle: 'light',
+    navigationBarBackgroundColor: '#fff',
+    navigationBarTitleText: '你画我猜 AI',
+    navigationBarTextStyle: 'black',
+  },
+};

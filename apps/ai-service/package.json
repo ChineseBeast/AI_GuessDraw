@@ -1,0 +1,13 @@
+{
+  "name": "draw-guess-ai-service",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "python -m uvicorn src.main:app --reload --host 0.0.0.0 --port 8000",
+    "build": "echo 'Python service: no build step required'",
+    "lint": "echo 'Python lint: ruff check src/'",
+    "lint:fix": "echo 'Python lint fix: ruff check src/ --fix'",
+    "typecheck": "echo 'Python typecheck: mypy src/'",
+    "clean": "rm -rf __pycache__ .mypy_cache .ruff_cache"
+  }
+}

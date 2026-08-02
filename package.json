@@ -1,0 +1,69 @@
+{
+  "name": "draw-guess-ai",
+  "private": true,
+  "packageManager": "pnpm@10.8.0",
+  "engines": {
+    "node": ">=22.13.0",
+    "pnpm": ">=10.8.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "typecheck": "turbo run typecheck",
+    "clean": "turbo run clean && rm -rf .turbo node_modules"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "catalog:",
+    "@commitlint/config-conventional": "catalog:",
+    "eslint": "catalog:",
+    "husky": "catalog:",
+    "lint-staged": "catalog:",
+    "prettier": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,jsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,yaml,yml}": [
+      "prettier --write"
+    ]
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@nestjs/core",
+      "@swc/core",
+      "@tarojs/binding",
+      "@tarojs/cli",
+      "core-js",
+      "esbuild",
+      "@parcel/watcher",
+      "core-js-pure"
+    ],
+    "ignoredBuiltDependencies": [
+      "@nestjs/core",
+      "@parcel/watcher",
+      "@swc/core",
+      "@tarojs/binding",
+      "@tarojs/cli",
+      "core-js",
+      "core-js-pure",
+      "esbuild"
+    ],
+    "approvedBuilds": {
+      "@nestjs/core": "*",
+      "@swc/core": "*",
+      "@tarojs/binding": "*",
+      "@tarojs/cli": "*",
+      "core-js": "*",
+      "esbuild": "*",
+      "@parcel/watcher": "*",
+      "core-js-pure": "*"
+    }
+  }
+}

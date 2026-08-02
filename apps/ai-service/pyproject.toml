@@ -1,0 +1,17 @@
+[project]
+name = "draw-guess-ai-service"
+version = "0.1.0"
+description = "AI service for Draw & Guess AI"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.100.0",
+    "uvicorn[standard]>=0.24.0",
+    "pydantic>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.5.0",
+    "mypy>=1.8.0",
+    "pytest>=7.4.0",
+]
