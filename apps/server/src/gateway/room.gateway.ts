@@ -11,9 +11,9 @@ import {
 import type { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
 import { COUNTDOWN_DURATION, ROUND_RESULT_DURATION, MAX_RECONNECT_TIME } from '@draw-guess/shared';
-import { RoomManagerService } from '../services/room-manager.service';
-import { GameEngineService } from '../services/game-engine.service';
-import { WordService } from '../services/word.service';
+import type { RoomManagerService } from '../services/room-manager.service';
+import type { GameEngineService } from '../services/game-engine.service';
+import type { WordService } from '../services/word.service';
 import type {
   CreateRoomPayload,
   JoinRoomPayload,

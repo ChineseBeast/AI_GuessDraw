@@ -1,5 +1,5 @@
 import { Controller, Post, Body, HttpCode, HttpException, HttpStatus } from '@nestjs/common';
-import { SinglePlayerService } from './singleplayer.service';
+import type { SinglePlayerService } from './singleplayer.service';
 import type { Difficulty } from '@draw-guess/shared';
 
 interface RecognizeDto {

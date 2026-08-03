@@ -1,5 +1,5 @@
 import { Controller, Get, Post, Body, Query, HttpCode, HttpException, HttpStatus } from '@nestjs/common';
-import { LeaderboardService } from './leaderboard.service';
+import type { LeaderboardService } from './leaderboard.service';
 import type { LeaderboardPeriod } from '@draw-guess/shared';
 
 interface LeaderboardQueryDto {
