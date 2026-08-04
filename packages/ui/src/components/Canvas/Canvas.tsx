@@ -1,10 +1,10 @@
 import React, { useRef, useState, useImperativeHandle, forwardRef, useEffect } from 'react';
 import type { CanvasStroke } from '@draw-guess/shared';
 import { CANVAS_WIDTH, CANVAS_HEIGHT } from '@draw-guess/shared';
-import type { CanvasProps, CanvasRef, ToolState } from './Canvas.types';
+import type { CanvasProps, CanvasRef, ExternalStroke, ToolState } from './Canvas.types';
 import { DEFAULT_TOOL_STATE } from './Canvas.types';
 import { useDrawing, useHistory, useKeyboardShortcuts } from './Canvas.hooks';
-import { renderCanvas } from './Canvas.utils';
+import { drawStroke, renderCanvas } from './Canvas.utils';
 
 export type { CanvasProps, CanvasRef, ToolState };
 
@@ -31,6 +31,8 @@ export const Canvas = forwardRef<CanvasRef, CanvasProps>(function Canvas(
 
   // 笔画管理
   const [strokes, setStrokes] = useState<CanvasStroke[]>([]);
+  // 动画回放定时器引用（用于在重新加载前清理）
+  const animTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { pushStroke, undo, redo, clear, undoneStrokes } = useHistory({
     strokes,
@@ -39,6 +41,63 @@ export const Canvas = forwardRef<CanvasRef, CanvasProps>(function Canvas(
     width,
     height,
   });
+
+  /** 加载外部笔画并逐笔动画绘制（用于 AI 绘画回放） */
+  const loadStrokes = React.useCallback(
+    (externalStrokes: ExternalStroke[], options?: { animate?: boolean; speed?: number }) => {
+      // 清理上一次动画
+      if (animTimerRef.current) {
+        clearTimeout(animTimerRef.current);
+        animTimerRef.current = null;
+      }
+
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      // 转换为内部 CanvasStroke
+      const converted: CanvasStroke[] = externalStrokes.map((s, i) => ({
+        id: `ai_stroke_${i}_${Date.now()}`,
+        points: s.points,
+        brush: { color: s.color, width: s.width, opacity: 1 },
+        tool: 'pen',
+        timestamp: Date.now() + i,
+      }));
+
+      // 清空并重置状态
+      renderCanvas(ctx, [], width, height);
+      setStrokes([]);
+
+      const animate = options?.animate ?? true;
+      const speed = options?.speed ?? 80; // 每笔间隔毫秒
+
+      if (!animate || converted.length === 0) {
+        // 直接全量渲染
+        renderCanvas(ctx, converted, width, height);
+        setStrokes(converted);
+        return;
+      }
+
+      // 逐笔动画：每隔 speed ms 绘制一条笔画
+      let index = 0;
+      const drawnSoFar: CanvasStroke[] = [];
+      const drawNext = () => {
+        if (index >= converted.length) {
+          animTimerRef.current = null;
+          return;
+        }
+        const stroke = converted[index];
+        drawnSoFar.push(stroke);
+        drawStroke(ctx, stroke); // 增量绘制单条笔画
+        setStrokes([...drawnSoFar]);
+        index += 1;
+        animTimerRef.current = setTimeout(drawNext, speed);
+      };
+      drawNext();
+    },
+    [canvasRef, width, height]
+  );
 
   // 绘画交互
   const { handlePointerDown, handlePointerMove, handlePointerUp } = useDrawing({
@@ -75,8 +134,9 @@ export const Canvas = forwardRef<CanvasRef, CanvasProps>(function Canvas(
       getStrokeCount: () => strokes.length,
       getUndoCount: () => undoneStrokes.length,
       isEmpty: () => strokes.length === 0,
+      loadStrokes,
     }),
-    [clear, undo, redo, strokes.length, undoneStrokes.length]
+    [clear, undo, redo, loadStrokes, strokes.length, undoneStrokes.length]
   );
 
   // 外部清空（当 readOnly 变化时）

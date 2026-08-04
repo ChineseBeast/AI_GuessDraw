@@ -1,4 +1,4 @@
-import type { AIRecognizeResponse, Difficulty } from '@draw-guess/shared';
+import type { AIRecognizeResponse, AIDrawResponse, Difficulty } from '@draw-guess/shared';
 
 const API_BASE = '/api/singleplayer';
 
@@ -41,6 +41,24 @@ export const AIService = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ message: 'Network error' }));
       throw new Error(err.message || 'AI 识别失败');
+    }
+
+    return res.json();
+  },
+
+  /**
+   * AI 生成绘画（笔画轨迹），前端在 Canvas 上重现绘制
+   */
+  async generateDrawing(targetWord: string, difficulty: Difficulty): Promise<AIDrawResponse> {
+    const res = await fetch(`${API_BASE}/generate-drawing`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ targetWord, difficulty }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: 'Network error' }));
+      throw new Error(err.message || 'AI 绘画生成失败');
     }
 
     return res.json();

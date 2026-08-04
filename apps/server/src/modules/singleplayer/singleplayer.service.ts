@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
+import process from 'node:process';
 import type { Difficulty } from '@draw-guess/shared';
-import type { AIGuess, AIRecognizeResponse } from './singleplayer.types';
+import type { AIRecognizeResponse } from './singleplayer.types';
 
 interface WordEntry {
   word: string;
@@ -44,39 +45,22 @@ const WORDS: WordEntry[] = [
   { word: '恐龙', difficulty: 'hard' },
 ];
 
-// 相似词映射（用于 mock 返回"接近"的猜测）
-const SIMILAR_WORDS: Record<string, string[]> = {
-  '苹果': ['水果', '番茄', '樱桃'],
-  '香蕉': ['水果', '黄瓜', '月牙'],
-  '太阳': ['月亮', '星星', '灯泡'],
-  '花朵': ['小草', '树叶', '蝴蝶'],
-  '大树': ['森林', '灌木', '树苗'],
-  '猫咪': ['小狗', '老虎', '兔子'],
-  '小狗': ['猫咪', '狼', '狐狸'],
-  '房子': ['城堡', '小屋', '建筑'],
-  '汽车': ['卡车', '巴士', '轿车'],
-  '月亮': ['太阳', '星星', '圆盘'],
-  '大象': ['犀牛', '河马', '长颈鹿'],
-  '飞机': ['火箭', '直升机', '飞鸟'],
-  '草莓': ['樱桃', '番茄', '葡萄'],
-  '闹钟': ['手表', '时钟', '铃铛'],
-  '雨伞': ['阳伞', '蘑菇', '帽子'],
-  '眼镜': ['墨镜', '望远镜', '放大镜'],
-  '吉他': ['提琴', '琵琶', '二胡'],
-  '火箭': ['飞机', '导弹', '飞船'],
-  '篮球': ['足球', '排球', '乒乓球'],
-  '蛋糕': ['面包', '饼干', '甜点'],
-  '直升机': ['飞机', '蜻蜓', '风车'],
-  '长颈鹿': ['大象', '鸵鸟', '斑马'],
-  '望远镜': ['显微镜', '眼镜', '万花筒'],
-  '金字塔': ['三角形', '山峰', '帐篷'],
-  '向日葵': ['菊花', '太阳', '风车'],
-  '北极熊': ['企鹅', '白熊', '熊猫'],
-  '消防车': ['卡车', '救护车', '警车'],
-  '摩天轮': ['风车', '车轮', '旋转木马'],
-  '潜水艇': ['鲸鱼', '轮船', '鱼雷'],
-  '恐龙': ['蜥蜴', '鳄鱼', '怪兽'],
-};
+/** ai-service 基础地址，默认本地开发地址 */
+const AI_SERVICE_URL = process.env.AI_SERVICE_URL?.replace(/\/$/, '') || 'http://localhost:8000';
+
+/** ai-service recognize 路由 */
+const AI_RECOGNIZE_ENDPOINT = `${AI_SERVICE_URL}/api/v1/ai/recognize`;
+
+/** ai-service generate-drawing 路由 */
+const AI_GENERATE_DRAWING_ENDPOINT = `${AI_SERVICE_URL}/api/v1/ai/generate-drawing`;
+
+/** 调用 ai-service 的超时时间（ms），略大于 ai-service 调用 MiniMax 的 30s 超时 */
+const AI_SERVICE_TIMEOUT_MS = 35_000;
+
+/** ai-service 错误响应体结构（FastAPI HTTPException detail） */
+interface AIServiceErrorBody {
+  detail?: { error?: string; message?: string } | string;
+}
 
 @Injectable()
 export class SinglePlayerService {
@@ -101,81 +85,100 @@ export class SinglePlayerService {
   }
 
   /**
-   * Mock AI 识别
+   * AI 识别画作
    *
-   * 模拟策略：
-   * - easy: 80% 正确率
-   * - medium: 60% 正确率
-   * - hard: 40% 正确率
-   * - 延迟: 200-800ms
+   * 通过 HTTP 调用 ai-service（FastAPI），由 ai-service 调用 minimax-m3 多模态模型识别图片。
+   * ai-service 不可用（网络错误/超时/503）时抛出 AI_SERVICE_UNAVAILABLE，
+   * 由 controller 转换为 HTTP 503 友好错误。
    */
   async recognize(
     imageBase64: string,
     targetWord: string,
     difficulty: Difficulty
   ): Promise<AIRecognizeResponse> {
-    // 模拟处理延迟
-    const delay = 200 + Math.random() * 600;
-    await new Promise((resolve) => setTimeout(resolve, delay));
-
-    // 5% 概率模拟服务不可用
-    if (Math.random() < 0.05) {
-      throw new Error('AI_SERVICE_UNAVAILABLE');
-    }
-
     // 验证图片不为空
     if (!imageBase64 || imageBase64.length < 100) {
       throw new Error('INVALID_IMAGE');
     }
 
-    const successRates: Record<Difficulty, number> = {
-      easy: 0.8,
-      medium: 0.6,
-      hard: 0.4,
-    };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), AI_SERVICE_TIMEOUT_MS);
 
-    const success = Math.random() < successRates[difficulty];
-
-    if (success) {
-      const confidence = 0.85 + Math.random() * 0.14;
-      const similarWords = SIMILAR_WORDS[targetWord] || ['东西', '物体', '形状'];
-
-      return {
-        guesses: [
-          { word: targetWord, confidence: parseFloat(confidence.toFixed(2)) },
-          { word: similarWords[0], confidence: parseFloat((0.6 + Math.random() * 0.3).toFixed(2)) },
-          { word: similarWords[1] || '东西', confidence: parseFloat((0.3 + Math.random() * 0.3).toFixed(2)) },
-        ],
-        isCorrect: true,
-        matchedGuess: {
-          word: targetWord,
-          confidence: parseFloat(confidence.toFixed(2)),
-        },
-        processingTime: Math.round(delay),
-      };
-    }
-
-    // 猜错：返回随机不匹配的词
-    const wrongPool = WORDS.filter((w) => w.word !== targetWord);
-    const wrongGuesses: AIGuess[] = [];
-    const usedWords = new Set<string>();
-
-    for (let i = 0; i < 3; i++) {
-      const candidates = wrongPool.filter((w) => !usedWords.has(w.word));
-      if (candidates.length === 0) break;
-      const pick = candidates[Math.floor(Math.random() * candidates.length)];
-      usedWords.add(pick.word);
-      wrongGuesses.push({
-        word: pick.word,
-        confidence: parseFloat((0.3 + Math.random() * 0.4).toFixed(2)),
+    try {
+      const res = await fetch(AI_RECOGNIZE_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: imageBase64, targetWord, difficulty }),
+        signal: controller.signal,
       });
-    }
 
-    return {
-      guesses: wrongGuesses,
-      isCorrect: false,
-      processingTime: Math.round(delay),
-    };
+      if (!res.ok) {
+        // 解析 ai-service 返回的错误结构
+        const body = (await res.json().catch(() => null)) as AIServiceErrorBody | null;
+        const detail = body?.detail;
+        const errorCode =
+          typeof detail === 'object' && detail !== null ? detail.error : undefined;
+
+        // ai-service 503 -> AI 服务不可用
+        if (res.status === 503 || errorCode === 'AI_SERVICE_UNAVAILABLE') {
+          throw new Error('AI_SERVICE_UNAVAILABLE');
+        }
+        // ai-service 400 且为图片无效
+        if (errorCode === 'INVALID_IMAGE') {
+          throw new Error('INVALID_IMAGE');
+        }
+        // 其他错误统一视为 AI 服务不可用，返回友好错误
+        throw new Error('AI_SERVICE_UNAVAILABLE');
+      }
+
+      return (await res.json()) as AIRecognizeResponse;
+    } catch (error) {
+      // AbortError（超时）或网络错误 -> AI 服务不可用
+      if (error instanceof Error) {
+        if (error.message === 'AI_SERVICE_UNAVAILABLE' || error.message === 'INVALID_IMAGE') {
+          throw error;
+        }
+        // fetch 网络失败 / abort
+        throw new Error('AI_SERVICE_UNAVAILABLE');
+      }
+      throw new Error('AI_SERVICE_UNAVAILABLE');
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  /**
+   * AI 绘画生成：调用 ai-service 根据目标词生成笔画轨迹（绘画行为）。
+   * ai-service 不可用时抛出 AI_SERVICE_UNAVAILABLE。
+   */
+  async generateDrawing(targetWord: string, difficulty: Difficulty): Promise<unknown> {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 60_000); // 绘画生成耗时较长，给 60s
+
+    try {
+      const res = await fetch(AI_GENERATE_DRAWING_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targetWord, difficulty }),
+        signal: controller.signal,
+      });
+
+      if (!res.ok) {
+        throw new Error('AI_SERVICE_UNAVAILABLE');
+      }
+
+      return await res.json();
+    } catch (error) {
+      if (error instanceof Error) {
+        if (error.message === 'AI_SERVICE_UNAVAILABLE') {
+          throw error;
+        }
+        throw new Error('AI_SERVICE_UNAVAILABLE');
+      }
+      throw new Error('AI_SERVICE_UNAVAILABLE');
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
   /**

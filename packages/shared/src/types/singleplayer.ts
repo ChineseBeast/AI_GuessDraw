@@ -33,6 +33,31 @@ export interface AIRecognizeResponse {
   processingTime: number;
 }
 
+/** AI 绘画笔画点 */
+export interface AIDrawPoint {
+  x: number;
+  y: number;
+}
+
+/** AI 绘画笔画 */
+export interface AIDrawStroke {
+  points: AIDrawPoint[];
+  color: string;
+  width: number;
+}
+
+/** AI 绘画生成请求 */
+export interface AIDrawRequest {
+  targetWord: string;
+  difficulty: Difficulty;
+}
+
+/** AI 绘画生成响应（绘画行为 = 笔画轨迹，前端在 Canvas 上重现绘制） */
+export interface AIDrawResponse {
+  strokes: AIDrawStroke[];
+  processingTime: number;
+}
+
 /** 计分明细 */
 export interface ScoreBreakdown {
   baseScore: number;

@@ -26,6 +26,7 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
     submitGuess,
     nextRound,
     resetGame,
+    generateAiDrawing,
     setGuessText,
     clearError,
   } = useSinglePlayer();
@@ -35,6 +36,34 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
   const [toolState, setToolState] = React.useState<ToolState>(DEFAULT_TOOL_STATE);
   const [showEmptyWarning, setShowEmptyWarning] = React.useState(false);
   const scoreSubmittedRef = useRef(false);
+
+  // AI 画轮次：进入 drawing 阶段后请求 AI 生成笔画并在 Canvas 上动画绘制
+  const aiDrawTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!currentRound || isUserDrawing) {
+      aiDrawTriggeredRef.current = false;
+      return;
+    }
+    // ai_draws 轮次且处于 drawing 阶段（AI 正在画/加载）
+    if (state.game?.status !== 'drawing') return;
+    if (aiDrawTriggeredRef.current) return; // 防止重复触发
+    aiDrawTriggeredRef.current = true;
+
+    let cancelled = false;
+    (async () => {
+      const strokes = await generateAiDrawing();
+      if (cancelled || strokes.length === 0) return;
+      // 在只读 Canvas 上动画回放 AI 的笔画
+      localCanvasRef.current?.loadStrokes(
+        strokes.map((s) => ({ points: s.points, color: s.color, width: s.width })),
+        { animate: true, speed: 120 }
+      );
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentRound, isUserDrawing, state.game?.status, generateAiDrawing]);
 
   // 自动提交分数到排行榜
   useEffect(() => {
@@ -115,7 +144,7 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
                 border: '1px solid #e0e0e0',
               }}
             >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
                 <strong>第 {round.roundNumber} 轮</strong>
                 <span style={{ fontSize: '0.85rem', color: '#666' }}>
                   {round.role === 'user_draws' ? '🎨 你画 AI 猜' : '🤖 AI 画 你猜'}
@@ -123,7 +152,10 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
                 <span style={{ fontSize: '0.85rem', color: '#999' }}>
                   词: <strong>{round.targetWord}</strong>
                 </span>
-                <span style={{ fontWeight: 'bold', color: '#2196f3' }}>+{round.userRoundScore}分</span>
+                <span style={{ display: 'flex', gap: '0.75rem' }}>
+                  <span style={{ fontWeight: 'bold', color: '#2196f3' }}>你 +{round.userRoundScore}</span>
+                  <span style={{ fontWeight: 'bold', color: '#f44336' }}>AI +{round.aiRoundScore}</span>
+                </span>
               </div>
             </div>
           ))}
@@ -203,22 +235,23 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
         {isUserDrawing && state.aiResult && (
           <div style={{ margin: '1rem 0' }}>
             <p>AI 的猜测：</p>
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-              {state.aiResult.guesses.map((g, i) => (
-                <span
-                  key={i}
-                  style={{
-                    padding: '0.3rem 0.8rem',
-                    borderRadius: '20px',
-                    background: g.word === currentRound.targetWord ? '#e8f5e9' : '#fff3e0',
-                    color: g.word === currentRound.targetWord ? '#2e7d32' : '#e65100',
-                    fontWeight: 'bold',
-                  }}
-                >
-                  {g.word} ({Math.round(g.confidence * 100)}%)
-                </span>
-              ))}
-            </div>
+            {state.aiResult.guesses.length > 0 ? (
+              <div
+                style={{
+                  display: 'inline-block',
+                  padding: '0.5rem 1.2rem',
+                  borderRadius: '20px',
+                  background: state.aiResult.isCorrect ? '#e8f5e9' : '#fff3e0',
+                  color: state.aiResult.isCorrect ? '#2e7d32' : '#e65100',
+                  fontWeight: 'bold',
+                  fontSize: '1.2rem',
+                }}
+              >
+                {state.aiResult.guesses[0].word}（{Math.round(state.aiResult.guesses[0].confidence * 100)}%）
+              </div>
+            ) : (
+              <span style={{ color: '#999' }}>AI 未能给出猜测</span>
+            )}
             <p style={{ marginTop: '0.5rem', color: state.aiResult.isCorrect ? '#2e7d32' : '#f44336' }}>
               {state.aiResult.isCorrect ? '✅ AI 猜对了！' : '❌ AI 没有猜对'}
             </p>
@@ -378,35 +411,38 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
               </div>
             </div>
           ) : (
-            <div style={{ textAlign: 'center', padding: '2rem' }}>
-              <div
-                style={{
-                  width: '100%',
-                  aspectRatio: '4/3',
-                  background: '#f5f5f5',
-                  borderRadius: '8px',
-                  border: '2px solid #333',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <div>
-                  {currentRound && (
-                    <p style={{ fontSize: '2rem', letterSpacing: '0.5rem', fontFamily: 'monospace', marginBottom: '0.5rem' }}>
-                      {'_'.repeat(currentRound.targetWord.length)}
-                    </p>
-                  )}
-                  <p style={{ color: '#666', fontSize: '0.9rem' }}>
-                    ({currentRound?.targetWord.length ?? '?'} 个字)
-                  </p>
-                  <p style={{ color: '#999', fontSize: '0.85rem' }}>
-                    AI 正在展示它的画作... 请猜出它画的是什么！
-                  </p>
+            <div>
+              {/* 字数提示 */}
+              {currentRound && (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    marginBottom: '0.75rem',
+                    padding: '0.5rem',
+                    background: '#e3f2fd',
+                    borderRadius: '8px',
+                    border: '2px dashed #2196f3',
+                  }}
+                >
+                  <span style={{ fontSize: '0.85rem', color: '#1565c0' }}>提示：AI 画的是一个 </span>
+                  <span style={{ fontSize: '1.4rem', fontWeight: 'bold', color: '#1565c0' }}>
+                    {currentRound.targetWord.length}
+                  </span>
+                  <span style={{ fontSize: '0.85rem', color: '#1565c0' }}> 字的词</span>
                 </div>
-              </div>
+              )}
 
-              {/* 猜词输入 */}
+              {/* AI 画作画布（只读，加载笔画后逐笔动画绘制） */}
+              <Canvas ref={localCanvasRef} toolState={toolState} onToolChange={setToolState} readOnly />
+
+              {/* AI 正在画时的加载提示 */}
+              {state.loading && (
+                <p style={{ textAlign: 'center', color: '#999', marginTop: '0.5rem', fontSize: '0.9rem' }}>
+                  🤖 AI 正在构思并绘制它的画作，请稍候...
+                </p>
+              )}
+
+              {/* 猜词输入（笔画绘制完成后 status=guessing 才可猜） */}
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', justifyContent: 'center' }}>
                 <input
                   type="text"
@@ -415,25 +451,27 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') submitGuess(state.guessText);
                   }}
-                  placeholder="输入你的猜测..."
+                  placeholder={state.game?.status === 'guessing' ? '输入你的猜测...' : '等 AI 画完再猜...'}
+                  disabled={state.game?.status !== 'guessing'}
                   style={{
                     padding: '0.6rem 1rem',
                     fontSize: '1rem',
                     borderRadius: '6px',
                     border: '1px solid #ccc',
                     width: '250px',
+                    background: state.game?.status === 'guessing' ? '#fff' : '#f5f5f5',
                   }}
                 />
                 <button
                   onClick={() => submitGuess(state.guessText)}
-                  disabled={!state.guessText.trim() || state.loading}
+                  disabled={!state.guessText.trim() || state.loading || state.game?.status !== 'guessing'}
                   style={{
                     padding: '0.6rem 1.5rem',
-                    background: state.loading ? '#ccc' : '#2196f3',
+                    background: state.loading || state.game?.status !== 'guessing' ? '#ccc' : '#2196f3',
                     color: 'white',
                     border: 'none',
                     borderRadius: '6px',
-                    cursor: state.loading ? 'default' : 'pointer',
+                    cursor: state.loading || state.game?.status !== 'guessing' ? 'default' : 'pointer',
                     fontWeight: 'bold',
                   }}
                 >

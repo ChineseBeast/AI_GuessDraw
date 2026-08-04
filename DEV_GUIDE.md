@@ -36,7 +36,7 @@ AI_GuessDraw/
 |---|---|---|---|
 | `apps/web` | React 18 + Vite 5 | 5173 | 单机/联机/排行榜/认证页面，useState 手动路由（无 react-router） |
 | `apps/server` | NestJS 10 + Socket.IO 4 | 3000 | REST API（`/api/v1` 前缀）+ WebSocket 网关，房间/游戏/认证/排行榜 |
-| `apps/ai-service` | FastAPI + Uvicorn | 8000 | AI 服务（目前仅 `/health` 和 `/api/v1/info`，待接入模型） |
+| `apps/ai-service` | FastAPI + Uvicorn | 8000 | AI 服务（`/api/v1/ai/recognize` 识别 + `/api/v1/ai/generate-drawing` 绘画，已接入 minimax-m3） |
 | `packages/shared` | TypeScript | — | 类型定义、常量、工具函数，`types` 字段指向 `src/index.ts` |
 | `packages/ui` | React + TypeScript | — | Canvas 组件（Canvas.tsx / Canvas.hooks.ts / Canvas.utils.ts） |
 
@@ -134,7 +134,7 @@ Implement                      →  编码
 |---|---|---|
 | 001 | Monorepo 脚手架 | 已完成 |
 | 002 | WebSocket 房间系统 | 已完成 |
-| 003 | 单机画布与 AI 对战 | 已完成（AI 识别为 mock） |
+| 003 | 单机画布与 AI 对战 | 基本完成（识别/绘画已接入真实 AI，待完善猜词/计分/测试等） |
 | 004 | 联机画布同步 + 排行榜 | 已完成 |
 | 005 | 用户系统（注册/登录/JWT） | 已完成（内存存储，V1） |
 
@@ -142,29 +142,33 @@ Implement                      →  编码
 
 ## 当前实现状态
 
-### 单机模式（可玩，AI 为 mock）
+### 单机模式（完整可玩，AI 识别/绘画均接入真实 minimax-m3）
 
 流程：选难度 → 画布绘画 → 提交 → AI 识别猜词 → 轮换角色（用户画/AI画）→ 计分结算 → 5 轮决胜负。
 
-**AI 识别目前是纯 mock**（`apps/server/src/modules/singleplayer/singleplayer.service.ts`）：
-- 按难度模拟正确率（easy 80% / medium 60% / hard 40%）
-- 200-800ms 随机延迟
-- 5% 概率模拟服务不可用
-- 返回固定格式的 `AIRecognizeResponse`
+**AI 识别已接入真实模型**（minimax-m3 多模态）：
+- `apps/ai-service/src/services/minimax_service.py` 调用 minimax-m3 Chat Completion API 识别画作（PNG 自动转 JPEG，多层容错解析 Top-3 猜测）
+- server `SinglePlayerService.recognize()` 经 HTTP 转发到 ai-service（35s 超时，503 时抛 `AI_SERVICE_UNAVAILABLE`）
 
-**需要接入真实 AI**：用户计划接入 **minimax-m3** 模型。
+**AI 绘画（AI 画用户猜）已实现**：
+- `apps/ai-service/src/services/draw_service.py` 让大模型规划简笔画**笔画轨迹**（3-15 笔），非文生图
+- server `SinglePlayerService.generateDrawing()` 转发到 ai-service（60s 超时）
+- Web 端 ai_draws 回合调用 `AIService.generateDrawing()`，Canvas `loadStrokes()` 动画回放 AI 笔画，随后用户猜词
 
 ### 数据流（单机模式）
 
 ```
-Web (useSinglePlayer hook)
-  → AIService.recognize()  (apps/web/src/services/ai.service.ts)
-  → POST /api/singleplayer/recognize  (NestJS controller)
-  → SinglePlayerService.recognize()   (mock 实现)
-  → 返回 AIRecognizeResponse
+Web (useSinglePlayer hook / AIService，apps/web/src/services/ai.service.ts)
+  → POST /api/singleplayer/{word|recognize|generate-drawing}
+  → vite dev proxy 重写 /api → /api/v1
+  → POST /api/v1/singleplayer/*  (NestJS controller)
+  → SinglePlayerService.recognize()/generateDrawing()  (HTTP 调用 ai-service)
+  → ai-service /api/v1/ai/recognize | /api/v1/ai/generate-drawing
+  → minimax-m3 API（识别 / 笔画轨迹生成）
+  → 返回 AIRecognizeResponse / AIDrawResponse
 ```
 
-注意：当前 API 路由是 `/api/singleplayer/*`（server 的 globalPrefix 是 `/api/v1`，但 controller 装饰器是 `@Controller('singleplayer')`，实际路径为 `/api/v1/singleplayer/*`）。Web 端 `AIService` 请求的是 `/api/singleplayer`，可能有路由不匹配的问题，接入时需确认。
+注意：Web 端 `AIService` 请求 `/api/singleplayer/*`，由 vite proxy 重写为 `/api/v1/singleplayer/*`（server globalPrefix 为 `/api/v1`），dev 环境下路由已匹配；生产部署需在网关配置同等重写。
 
 ### 联机模式（基本完整）
 
@@ -174,12 +178,19 @@ WebSocket 房间系统：创建/加入/离开房间、画布实时同步、猜�
 
 注册/登录（用户名+密码）、JWT 鉴权、游客模式、WebSocket 连接认证。用户数据存储在内存 Map 中，后续需迁移至数据库。
 
+### 单机模式待完善（相对 spec 003）
+
+- 猜词交互：猜错直接进入轮次结算，spec 003 US2 要求可继续猜直至猜对/超时
+- 猜词超时：ai_draws 回合倒计时归零后未自动结算（仅用户绘画回合有超时自动提交）
+- 计分规则：Web 端当前为 1 分制简化计分，spec US5 要求 10 分制 + 时间/置信度奖励（server 已有 `calculateScore` 未被 Web 使用）
+- AI 服务降级：spec SP-015 要求识别超时/不可用时提供重试 + 30% 随机匹配降级（当前仅友好错误提示）
+- 未完成任务：Toolbar/Timer/快捷键/响应式测试（T027/T041/T052）、页面过渡动画（T055）、全量测试（T059）、quickstart（T060）
+
 ### 未实现
 
 - 故事模式（Spec 中有规划，未开始）
 - 小程序端功能（仅脚手架）
 - 数据库持久化
-- AI 绘画生成（AI 画用户猜的回合，目前只支持用户画 AI 猜）
 
 ---
 
@@ -231,19 +242,20 @@ const API_ROUTES = {
 
 ## AI 服务接入 minimax-m3 的要点
 
-### 当前状态
+### 当前实现（已完成）
 
-- `apps/ai-service/src/main.py` 仅有 `/health` 和 `/api/v1/info` 两个端点
-- `src/routers/` 和 `src/services/` 目录为空
-- 依赖仅 `fastapi + uvicorn + pydantic`，未包含 HTTP 客户端和 AI SDK
-- NestJS server 的 `SinglePlayerService.recognize()` 是 mock，未调用 ai-service
+- `apps/ai-service/src/routers/ai.py`：`/api/v1/ai/recognize`（识别）+ `/api/v1/ai/generate-drawing`（笔画轨迹生成）
+- `apps/ai-service/src/services/minimax_service.py`：调用 minimax-m3 多模态 API 识别简笔画（PNG 自动转 JPEG）
+- `apps/ai-service/src/services/draw_service.py`：调用 minimax-m3 生成笔画轨迹（3-15 笔/词）
+- 依赖含 `httpx`（HTTP 客户端）+ `Pillow`（图片转码），API key 经 `.env`/环境变量注入
+- NestJS server 的 `SinglePlayerService.recognize()/generateDrawing()` 已改为 HTTP 调用 ai-service
 
-### 接入路径
+### 接入路径（已完成）
 
-1. **ai-service 端**：新增 `/api/v1/ai/recognize` 路由，接收 `AIRecognizeRequest`，调用 minimax-m3 多模态 API 识别图片，返回 `AIRecognizeResponse`
-2. **server 端**：将 `SinglePlayerService.recognize()` 从 mock 改为 HTTP 调用 ai-service 的 `/api/v1/ai/recognize`
-3. **环境变量**：minimax API key 等敏感信息通过环境变量注入，不硬编码
-4. **降级方案**：ai-service 不可用时返回友好错误，前端已有 `AI_SERVICE_UNAVAILABLE` 错误处理
+1. **ai-service 端**：`/api/v1/ai/recognize` 接收 `AIRecognizeRequest`，调用 minimax-m3 多模态 API 识别图片，返回 `AIRecognizeResponse`
+2. **server 端**：`SinglePlayerService.recognize()` 已从 mock 改为 HTTP 调用 ai-service 的 `/api/v1/ai/recognize`
+3. **环境变量**：minimax API key 等敏感信息经 `.env`/环境变量注入，不硬编码
+4. **降级方案**：ai-service 不可用时返回友好错误（HTTP 503），前端已有 `AI_SERVICE_UNAVAILABLE` 错误处理
 
 ### minimax-m3 模型信息
 
@@ -263,7 +275,7 @@ const API_ROUTES = {
 我在开发一个 AI 驱动的你画我猜游戏项目（AI_GuessDraw），Monorepo 结构（Turborepo + pnpm workspace），包含 6 个包：
 - apps/web — React 18 + Vite 前端
 - apps/server — NestJS 10 后端（REST API `/api/v1` 前缀 + WebSocket 网关，端口 3000）
-- apps/ai-service — FastAPI (Python) AI 服务（端口 8000，目前仅 health check）
+- apps/ai-service — FastAPI (Python) AI 服务（端口 8000，识别/绘画已接入 minimax-m3）
 - apps/miniprogram — Taro 4 小程序（仅脚手架）
 - packages/shared — 共享类型/常量/工具（TypeScript composite 项目）
 - packages/ui — 共享 Canvas 组件
@@ -277,25 +289,29 @@ const API_ROUTES = {
 - packages/shared 的 types 指向源码 src/index.ts，消费方 tsconfig 不要加 references
 
 当前状态：
-- 单机模式可玩但 AI 识别是 mock（apps/server/src/modules/singleplayer/singleplayer.service.ts 中按难度随机猜对/猜错）
+- 单机模式完整可玩：AI 识别已接入真实 minimax-m3（apps/ai-service/src/services/minimax_service.py），AI 绘画未实现（apps/ai-service/src/services/draw_service.py 生成笔画轨迹 + 前端 Canvas 动画回放）
 - 联机模式基本完整（WebSocket 房间 + 画布同步 + 猜词）
 - 用户系统 V1（内存存储，JWT 鉴权）
+- 单机模式待完善：猜词交互/超时、计分规则（1 分制 vs spec 10 分制）、AI 服务降级重试、未完成测试
 - 故事模式未开始，小程序仅脚手架
 
 关键类型：
 - AIRecognizeRequest: { image: string (base64 PNG), targetWord: string, difficulty: 'easy'|'medium'|'hard' }
 - AIRecognizeResponse: { guesses: {word, confidence}[], isCorrect: boolean, matchedGuess?: {word, confidence}, processingTime: number }
+- AIDrawRequest: { targetWord: string, difficulty: 'easy'|'medium'|'hard' }
+- AIDrawResponse: { strokes: {points: {x,y}[], color, width}[], processingTime: number }
 - 共享包索引：packages/shared/src/index.ts
 
 ## 本次任务
 
-接入 minimax-m3 模型替换 mock AI 识别。具体要求：
+ai画我猜 + 完善单机模式。具体要求：
 
-1. 在 apps/ai-service 中新增 /api/v1/ai/recognize 路由，接收 AIRecognizeRequest，调用 minimax-m3 多模态 API 识别图片，返回 AIRecognizeResponse
-2. 将 apps/server 的 SinglePlayerService.recognize() 从 mock 改为 HTTP 调用 ai-service
-3. minimax API key 通过环境变量注入
-4. ai-service 不可用时返回友好错误，前端已有 AI_SERVICE_UNAVAILABLE 处理
-5. 保持现有类型契约不变，不改 packages/shared 中的类型定义
+1. **AI 画我猜回合**：核对并完善 ai_draws 全链路（ai-service `/api/v1/ai/generate-drawing` 生成笔画轨迹 → server 转发 → Web `AIService.generateDrawing()` → Canvas `loadStrokes()` 动画回放 → 用户猜词）
+2. **猜词交互**：猜错后允许继续猜（spec 003 US2 验收 5），并处理 ai_draws 回合猜词倒计时归零的自动结算（当前会停在 guessing 状态）
+3. **计分对齐 spec**：将 Web 端 1 分制改为 spec US5 的 10 分制（基础分 10 + 时间奖励 floor(剩余秒×0.1, 最大 5) + 置信度奖励最大 5），与 server `calculateScore` 对齐
+4. **AI 服务降级**：spec SP-015 要求识别超时/不可用时提供重试按钮 + 30% 随机匹配降级
+5. **补全未完成任务**：Toolbar/Timer/快捷键/响应式测试（T027/T041/T052）、页面过渡动画（T055）、全量测试通过（T059）、quickstart 验证（T060）
+6. 保持现有类型契约不变，不改 packages/shared 中的类型定义
 
 请先阅读相关文件了解现有实现，然后给出修改方案。
 ```
@@ -313,7 +329,7 @@ const API_ROUTES = {
 | Server 入口 | `apps/server/src/main.ts` |
 | Server 模块注册 | `apps/server/src/app.module.ts` |
 | 单机 controller | `apps/server/src/modules/singleplayer/singleplayer.controller.ts` |
-| 单机 service（mock AI） | `apps/server/src/modules/singleplayer/singleplayer.service.ts` |
+| 单机 service（转发 ai-service） | `apps/server/src/modules/singleplayer/singleplayer.service.ts` |
 | 单机类型 | `apps/server/src/modules/singleplayer/singleplayer.types.ts` |
 | WebSocket 网关 | `apps/server/src/gateway/room.gateway.ts` |
 | 认证模块 | `apps/server/src/modules/auth/` |
