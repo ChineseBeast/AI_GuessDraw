@@ -1,5 +1,5 @@
 import { Controller, Post, Body, HttpCode, HttpException, HttpStatus } from '@nestjs/common';
-import type { SinglePlayerService } from './singleplayer.service';
+import { SinglePlayerService } from './singleplayer.service';
 import type { Difficulty } from '@draw-guess/shared';
 
 interface RecognizeDto {
@@ -11,6 +11,11 @@ interface RecognizeDto {
 interface WordDto {
   difficulty: Difficulty;
   excludeWords?: string[];
+}
+
+interface DrawDto {
+  targetWord: string;
+  difficulty: Difficulty;
 }
 
 @Controller('singleplayer')
@@ -77,6 +82,45 @@ export class SinglePlayerController {
         throw new HttpException(
           { error: 'INVALID_REQUEST', message: '图片数据无效' },
           HttpStatus.BAD_REQUEST,
+        );
+      }
+
+      throw new HttpException(
+        { error: 'INTERNAL_ERROR', message: '服务器内部错误' },
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  @Post('generate-drawing')
+  @HttpCode(200)
+  async generateDrawing(@Body() dto: DrawDto) {
+    const { targetWord, difficulty } = dto;
+
+    if (!targetWord) {
+      throw new HttpException(
+        { error: 'INVALID_REQUEST', message: '缺少必填参数: targetWord' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (!difficulty || !['easy', 'medium', 'hard'].includes(difficulty)) {
+      throw new HttpException(
+        { error: 'INVALID_REQUEST', message: '无效的 difficulty 参数' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    try {
+      const result = await this.service.generateDrawing(targetWord, difficulty);
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+
+      if (message === 'AI_SERVICE_UNAVAILABLE') {
+        throw new HttpException(
+          { error: 'AI_SERVICE_UNAVAILABLE', message: 'AI 绘画服务暂时不可用，请稍后重试' },
+          HttpStatus.SERVICE_UNAVAILABLE,
         );
       }
 

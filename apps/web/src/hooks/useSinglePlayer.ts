@@ -4,7 +4,7 @@ import type {
   SinglePlayerRound,
   Difficulty,
   AIRecognizeResponse,
-  ScoreBreakdown,
+  AIDrawStroke,
 } from '@draw-guess/shared';
 import { TOTAL_ROUNDS, ROUND_TIME } from '@draw-guess/shared';
 import { AIService } from '../services/ai.service';
@@ -19,6 +19,8 @@ interface SinglePlayerState {
   guessText: string;
   guessFeedback: string | null;
   aiResult: AIRecognizeResponse | null;
+  /** AI 画的笔画轨迹（ai_draws 轮次用） */
+  aiStrokes: AIDrawStroke[];
 }
 
 const initialState: SinglePlayerState = {
@@ -29,7 +31,30 @@ const initialState: SinglePlayerState = {
   guessText: '',
   guessFeedback: null,
   aiResult: null,
+  aiStrokes: [],
 };
+
+// ─── Scoring ──────────────────────────────────────
+
+/** 每轮得分（猜对一轮加 1 分，谁猜对给谁加分）。 */
+export interface RoundScore {
+  userGain: number;
+  aiGain: number;
+}
+
+/**
+ * 计算单轮得分：猜对加 1 分，猜错加 0 分。
+ * - `user_draws`（用户画 AI 猜）：AI 猜对则 AI 加分，否则用户加分（用户成功让 AI 没猜对）。
+ * - `ai_draws`（AI 画 用户猜）：用户猜对则用户加分，否则 AI 加分。
+ */
+export function calculateRoundScore(isCorrect: boolean, role: SinglePlayerRound['role']): RoundScore {
+  if (role === 'user_draws') {
+    // isCorrect 表示 AI 是否猜对
+    return isCorrect ? { userGain: 0, aiGain: 1 } : { userGain: 1, aiGain: 0 };
+  }
+  // ai_draws：isCorrect 表示用户是否猜对
+  return isCorrect ? { userGain: 1, aiGain: 0 } : { userGain: 0, aiGain: 1 };
+}
 
 // ─── Actions ──────────────────────────────────────
 
@@ -37,12 +62,14 @@ type Action =
   | { type: 'START_GAME'; game: SinglePlayerGame }
   | { type: 'TICK'; timeRemaining: number }
   | { type: 'SUBMIT_DRAWING' }
-  | { type: 'AI_RECOGNIZED'; result: AIRecognizeResponse; scoreBreakdown: ScoreBreakdown }
+  | { type: 'AI_RECOGNIZED'; result: AIRecognizeResponse; score: RoundScore }
   | { type: 'AI_RECOGNIZE_ERROR'; error: string }
   | { type: 'SET_GUESS_TEXT'; text: string }
   | { type: 'SUBMIT_GUESS' }
-  | { type: 'GUESS_RESULT'; isCorrect: boolean; feedback: string; scoreBreakdown: ScoreBreakdown }
+  | { type: 'GUESS_RESULT'; isCorrect: boolean; feedback: string; score: RoundScore }
   | { type: 'NEXT_ROUND'; targetWord: string; round: SinglePlayerRound }
+  | { type: 'AI_DRAWING_GENERATED'; strokes: AIDrawStroke[] }
+  | { type: 'AI_DRAWING_ERROR'; error: string }
   | { type: 'END_GAME' }
   | { type: 'SET_ERROR'; error: string }
   | { type: 'CLEAR_ERROR' }
@@ -74,10 +101,13 @@ function reducer(state: SinglePlayerState, action: Action): SinglePlayerState {
       const rounds = [...state.game.rounds];
       const currentRound = { ...rounds[rounds.length - 1] };
       currentRound.aiGuesses = action.result.guesses;
-      currentRound.userRoundScore = action.scoreBreakdown.total;
+      // 用户画 AI 猜：AI 猜对则 AI 得分，否则用户得分
+      currentRound.aiRoundScore = action.score.aiGain;
+      currentRound.userRoundScore = action.score.userGain;
       rounds[rounds.length - 1] = currentRound;
 
       const userScore = rounds.reduce((sum, r) => sum + r.userRoundScore, 0);
+      const aiScore = rounds.reduce((sum, r) => sum + r.aiRoundScore, 0);
 
       return {
         ...state,
@@ -87,6 +117,7 @@ function reducer(state: SinglePlayerState, action: Action): SinglePlayerState {
           ...state.game,
           rounds,
           userScore,
+          aiScore,
           status: 'round_end',
         },
       };
@@ -110,10 +141,13 @@ function reducer(state: SinglePlayerState, action: Action): SinglePlayerState {
       const rounds = [...state.game.rounds];
       const currentRound = { ...rounds[rounds.length - 1] };
       currentRound.userGuessedCorrectly = action.isCorrect;
-      currentRound.userRoundScore = action.scoreBreakdown.total;
+      // AI 画 用户猜：用户猜对则用户得分，否则 AI 得分
+      currentRound.userRoundScore = action.score.userGain;
+      currentRound.aiRoundScore = action.score.aiGain;
       rounds[rounds.length - 1] = currentRound;
 
       const userScore = rounds.reduce((sum, r) => sum + r.userRoundScore, 0);
+      const aiScore = rounds.reduce((sum, r) => sum + r.aiRoundScore, 0);
 
       return {
         ...state,
@@ -124,6 +158,7 @@ function reducer(state: SinglePlayerState, action: Action): SinglePlayerState {
           ...state.game,
           rounds,
           userScore,
+          aiScore,
           status: 'round_end',
         },
       };
@@ -134,8 +169,9 @@ function reducer(state: SinglePlayerState, action: Action): SinglePlayerState {
       const newRound: SinglePlayerRound = action.round;
       return {
         ...state,
-        loading: false,
+        loading: newRound.role === 'ai_draws', // AI 画轮次：加载笔画时显示 loading
         aiResult: null,
+        aiStrokes: [],
         guessFeedback: null,
         guessText: '',
         timeRemaining: ROUND_TIME,
@@ -147,6 +183,27 @@ function reducer(state: SinglePlayerState, action: Action): SinglePlayerState {
         },
       };
     }
+
+    case 'AI_DRAWING_GENERATED': {
+      if (!state.game) return state;
+      // 笔画生成完成，进入猜测阶段
+      return {
+        ...state,
+        loading: false,
+        aiStrokes: action.strokes,
+        game: {
+          ...state.game,
+          status: 'guessing',
+        },
+      };
+    }
+
+    case 'AI_DRAWING_ERROR':
+      return {
+        ...state,
+        loading: false,
+        error: action.error,
+      };
 
     case 'END_GAME':
       if (!state.game) return state;
@@ -175,34 +232,6 @@ export function useSinglePlayer() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const canvasRef = useRef<{ getImageDataURL: () => string; clear: () => void; isEmpty: () => boolean } | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // ─── Helpers ──────────────────────────────────
-
-  const calculateScore = useCallback(
-    (isCorrect: boolean, timeRemaining: number, confidence?: number, role: 'user_draws' | 'ai_draws' = 'user_draws'): ScoreBreakdown => {
-      if (!isCorrect) {
-        if (role === 'user_draws') {
-          return { baseScore: 1, timeBonus: 0, confidenceBonus: 0, total: 1 };
-        }
-        return { baseScore: 0, timeBonus: 0, confidenceBonus: 0, total: 0 };
-      }
-
-      const baseScore = 10;
-      const timeBonus = Math.min(Math.floor(timeRemaining * 0.1), 5);
-      const confidenceBonus =
-        role === 'user_draws' && confidence !== undefined
-          ? Math.min(Math.floor(confidence * 5), 5)
-          : 0;
-
-      return {
-        baseScore,
-        timeBonus,
-        confidenceBonus,
-        total: baseScore + timeBonus + confidenceBonus,
-      };
-    },
-    []
-  );
 
   // ─── Timer ─────────────────────────────────────
 
@@ -287,21 +316,17 @@ export function useSinglePlayer() {
 
     try {
       const result = await AIService.recognize(imageDataUrl, currentRound.targetWord, game.difficulty);
-      const breakdown = calculateScore(
-        result.isCorrect,
-        (state as SinglePlayerState).timeRemaining,
-        result.matchedGuess?.confidence,
-        'user_draws'
-      );
+      // 用户画 AI 猜：result.isCorrect 表示 AI 是否猜对
+      const score = calculateRoundScore(result.isCorrect, 'user_draws');
 
-      dispatch({ type: 'AI_RECOGNIZED', result, scoreBreakdown: breakdown });
+      dispatch({ type: 'AI_RECOGNIZED', result, score });
     } catch (err) {
       dispatch({
         type: 'AI_RECOGNIZE_ERROR',
         error: err instanceof Error ? err.message : 'AI 识别失败',
       });
     }
-  }, [state, stopTimer, calculateScore]);
+  }, [state, stopTimer]);
 
   const submitGuess = useCallback(
     async (text: string) => {
@@ -323,11 +348,12 @@ export function useSinglePlayer() {
       }
 
       stopTimer();
-      const breakdown = calculateScore(isCorrect, (state as SinglePlayerState).timeRemaining, undefined, 'ai_draws');
+      // AI 画 用户猜：isCorrect 表示用户是否猜对
+      const score = calculateRoundScore(isCorrect, 'ai_draws');
 
-      dispatch({ type: 'GUESS_RESULT', isCorrect, feedback, scoreBreakdown: breakdown });
+      dispatch({ type: 'GUESS_RESULT', isCorrect, feedback, score });
     },
-    [state, stopTimer, calculateScore]
+    [state, stopTimer]
   );
 
   const nextRound = useCallback(async () => {
@@ -378,6 +404,28 @@ export function useSinglePlayer() {
     canvasRef.current?.clear();
   }, [stopTimer]);
 
+  /** AI 画轮次：调用后端生成笔画轨迹，返回笔画供页面在 Canvas 上绘制。 */
+  const generateAiDrawing = useCallback(async (): Promise<AIDrawStroke[]> => {
+    const game = (state as SinglePlayerState).game;
+    if (!game) return [];
+
+    const currentRound = game.rounds[game.rounds.length - 1];
+    if (currentRound.role !== 'ai_draws') return [];
+
+    try {
+      const result = await AIService.generateDrawing(currentRound.targetWord, game.difficulty);
+      dispatch({ type: 'AI_DRAWING_GENERATED', strokes: result.strokes });
+      startTimer();
+      return result.strokes;
+    } catch (err) {
+      dispatch({
+        type: 'AI_DRAWING_ERROR',
+        error: err instanceof Error ? err.message : 'AI 绘画生成失败',
+      });
+      return [];
+    }
+  }, [state, startTimer]);
+
   // ─── Current Round Info ────────────────────────
 
   const currentRound = state.game?.rounds[state.game.rounds.length - 1] ?? null;
@@ -395,6 +443,7 @@ export function useSinglePlayer() {
     submitGuess,
     nextRound,
     resetGame,
+    generateAiDrawing,
     setGuessText: (text: string) => dispatch({ type: 'SET_GUESS_TEXT', text }),
     clearError: () => dispatch({ type: 'CLEAR_ERROR' }),
   };
