@@ -54,8 +54,8 @@ const AI_RECOGNIZE_ENDPOINT = `${AI_SERVICE_URL}/api/v1/ai/recognize`;
 /** ai-service generate-drawing 路由 */
 const AI_GENERATE_DRAWING_ENDPOINT = `${AI_SERVICE_URL}/api/v1/ai/generate-drawing`;
 
-/** 调用 ai-service 的超时时间（ms），略大于 ai-service 调用 MiniMax 的 30s 超时 */
-const AI_SERVICE_TIMEOUT_MS = 35_000;
+/** 调用 ai-service 的超时时间（ms）：千问 flash 识别/绘画最坏 60s + 兜底余量 */
+const AI_SERVICE_TIMEOUT_MS = 75_000;
 
 /** ai-service 错误响应体结构（FastAPI HTTPException detail） */
 interface AIServiceErrorBody {
@@ -153,7 +153,7 @@ export class SinglePlayerService {
    */
   async generateDrawing(targetWord: string, difficulty: Difficulty): Promise<unknown> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 60_000); // 绘画生成耗时较长，给 60s
+    const timeout = setTimeout(() => controller.abort(), 75_000); // 千问 flash 绘画 ~22s，最坏 60s + 兜底余量
 
     try {
       const res = await fetch(AI_GENERATE_DRAWING_ENDPOINT, {

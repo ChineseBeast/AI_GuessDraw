@@ -1,5 +1,6 @@
 """MiniMax 多模态识别服务：调用 minimax-m3 的 Chat Completion API 识别简笔画。"""
 
+import asyncio
 import base64
 import binascii
 import io
@@ -195,8 +196,13 @@ async def recognize_drawing(image_base64: str) -> list[AIGuess]:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            resp = await client.post(url, headers=headers, json=payload)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
+            # 用 asyncio.wait_for 强制 60s 总超时（httpx read timeout 只限单次读取间隔，
+            # 流式响应持续有 chunk 时不触发，需 wait_for 限制总时长，防真卡死）
+            resp = await asyncio.wait_for(client.post(url, headers=headers, json=payload), timeout=60.0)
+    except asyncio.TimeoutError:
+        logger.warning("AI 识别调用总耗时超 60s")
+        raise MiniMaxError("AI 识别超时，请稍后重试") from None
     except httpx.HTTPError as exc:
         logger.error("调用 MiniMax API 网络错误: %s", exc)
         raise MiniMaxError(f"调用 MiniMax API 网络错误: {exc}") from exc

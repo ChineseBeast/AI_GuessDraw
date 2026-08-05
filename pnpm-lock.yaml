@@ -96,6 +96,9 @@ catalogs:
     lint-staged:
       specifier: ^15.2.10
       version: 15.5.2
+    nanoid:
+      specifier: ^3.3.8
+      version: 3.3.16
     postcss:
       specifier: ^8.4.49
       version: 8.5.25
@@ -261,8 +264,8 @@ importers:
         specifier: ^6.0.0
         version: 6.0.0
       nanoid:
-        specifier: ^3.3.8
-        version: 3.3.8
+        specifier: 'catalog:'
+        version: 3.3.16
       passport:
         specifier: ^0.7.0
         version: 0.7.0
@@ -5821,11 +5824,6 @@ packages:
 
   nanoid@3.3.16:
     resolution: {integrity: sha512-bzlKTyNJ7+LdGIIwy8ijFpIqEQIvafahV7eYykJ8Cvh42EdJeODoJ6gUJXpQJvej1BddH8OqTXZNE/KfbWAu8Q==}
-    engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
-    hasBin: true
-
-  nanoid@3.3.8:
-    resolution: {integrity: sha512-WNLf5Sd8oZxOm+TzppcYk8gVOgP+l58xNy58D0nbUnOxOWRWvlcCV4kUF7ltmI6PsrLl/BgKEyS4mqsGChFN0w==}
     engines: {node: ^10 || ^12 || ^13.7 || ^14 || >=15.0.1}
     hasBin: true
 
@@ -14187,8 +14185,6 @@ snapshots:
       thenify-all: 1.6.0
 
   nanoid@3.3.16: {}
-
-  nanoid@3.3.8: {}
 
   napi-postinstall@0.3.4: {}
 

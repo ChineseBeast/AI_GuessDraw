@@ -88,7 +88,7 @@ async def generate_drawing_route(req: DrawRequest) -> DrawResponse:
         )
 
     try:
-        strokes = await generate_drawing(req.targetWord)
+        strokes = await generate_drawing(req.targetWord, req.difficulty)
     except DrawError as exc:
         raise HTTPException(
             status_code=503,
