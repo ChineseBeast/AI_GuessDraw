@@ -1,0 +1,20 @@
+- generic [ref=f4e29]:
+  - heading "📊 第 1 轮结束" [level=2] [ref=f4e91]
+  - paragraph [ref=f4e92]:
+    - text: 答案是：
+    - strong [ref=f4e93]: 香蕉
+  - generic [ref=f4e94]:
+    - paragraph [ref=f4e95]: AI 的猜测：
+    - generic [ref=f4e96]: 直线（85%）
+    - paragraph [ref=f4e97]: ❌ AI 没有猜对
+  - generic [ref=f4e98]:
+    - generic [ref=f4e99]: 第 1/5 轮
+    - generic [ref=f4e100]:
+      - generic [ref=f4e101]:
+        - generic [ref=f4e102]: 你
+        - generic [ref=f4e103]: "1"
+      - generic [ref=f4e104]: VS
+      - generic [ref=f4e105]:
+        - generic [ref=f4e106]: AI
+        - generic [ref=f4e107]: "0"
+  - button "下一轮 ➡️" [ref=f4e108] [cursor=pointer]

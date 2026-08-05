@@ -1,0 +1,14 @@
+- generic [ref=f2e15]:
+  - heading "🎨 单机模式" [level=1] [ref=f2e16]
+  - paragraph [ref=f2e17]: 与 AI 进行 1v1 绘画对战！你画我猜，AI 画你猜，5 轮决胜负。
+  - generic [ref=f2e18]:
+    - button "🟢 简单 常见词汇，AI 识别宽松" [ref=f2e19] [cursor=pointer]:
+      - generic [ref=f2e20]: 🟢 简单
+      - generic [ref=f2e21]: 常见词汇，AI 识别宽松
+    - button "🟡 中等 一般词汇，AI 识别正常" [ref=f2e22] [cursor=pointer]:
+      - generic [ref=f2e23]: 🟡 中等
+      - generic [ref=f2e24]: 一般词汇，AI 识别正常
+    - button "🔴 困难 生僻词汇，AI 识别严格" [ref=f2e25] [cursor=pointer]:
+      - generic [ref=f2e26]: 🔴 困难
+      - generic [ref=f2e27]: 生僻词汇，AI 识别严格
+  - button "← 返回首页" [ref=f2e28] [cursor=pointer]

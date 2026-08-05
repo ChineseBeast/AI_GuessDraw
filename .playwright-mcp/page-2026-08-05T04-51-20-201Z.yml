@@ -1,0 +1,20 @@
+- generic [ref=f2e29]:
+  - heading "📊 第 1 轮结束" [level=2] [ref=f2e92]
+  - paragraph [ref=f2e93]:
+    - text: 答案是：
+    - strong [ref=f2e94]: 太阳
+  - generic [ref=f2e95]:
+    - paragraph [ref=f2e96]: AI 的猜测：
+    - generic [ref=f2e97]: 日食（95%）
+    - paragraph [ref=f2e98]: ✅ AI 猜对了！
+  - generic [ref=f2e99]:
+    - generic [ref=f2e100]: 第 1/5 轮
+    - generic [ref=f2e101]:
+      - generic [ref=f2e102]:
+        - generic [ref=f2e103]: 你
+        - generic [ref=f2e104]: "0"
+      - generic [ref=f2e105]: VS
+      - generic [ref=f2e106]:
+        - generic [ref=f2e107]: AI
+        - generic [ref=f2e108]: "1"
+  - button "下一轮 ➡️" [ref=f2e109] [cursor=pointer]
