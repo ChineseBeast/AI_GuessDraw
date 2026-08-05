@@ -1,0 +1,48 @@
+- generic [ref=f3e30]:
+  - generic [ref=f3e31]:
+    - generic [ref=f3e32]:
+      - generic [ref=f3e33]: 第 1/5 轮
+      - generic [ref=f3e34]: 59s
+      - generic [ref=f3e38]: 🎨 你来画！
+    - generic [ref=f3e39]:
+      - generic [ref=f3e40]: 你要画的是：花朵
+      - button "✅ 提交绘画" [ref=f3e44] [cursor=pointer]
+  - generic [ref=f3e45]:
+    - generic [ref=f3e46]:
+      - generic [ref=f3e47]: 第 1/5 轮
+      - generic [ref=f3e48]:
+        - generic [ref=f3e49]:
+          - generic [ref=f3e50]: 你
+          - generic [ref=f3e51]: "0"
+        - generic [ref=f3e52]: VS
+        - generic [ref=f3e53]:
+          - generic [ref=f3e54]: AI
+          - generic [ref=f3e55]: "0"
+    - generic [ref=f3e57]:
+      - generic [ref=f3e58]:
+        - button "✏️ 画笔" [ref=f3e59] [cursor=pointer]
+        - button "🧹 橡皮" [ref=f3e60] [cursor=pointer]
+      - generic [ref=f3e61]:
+        - generic [ref=f3e62]: 颜色
+        - generic [ref=f3e63]:
+          - 'button "颜色 #000000" [ref=f3e64] [cursor=pointer]'
+          - 'button "颜色 #FFFFFF" [ref=f3e65] [cursor=pointer]'
+          - 'button "颜色 #FF0000" [ref=f3e66] [cursor=pointer]'
+          - 'button "颜色 #FF6B00" [ref=f3e67] [cursor=pointer]'
+          - 'button "颜色 #FFD600" [ref=f3e68] [cursor=pointer]'
+          - 'button "颜色 #00C853" [ref=f3e69] [cursor=pointer]'
+          - 'button "颜色 #00B0FF" [ref=f3e70] [cursor=pointer]'
+          - 'button "颜色 #2979FF" [ref=f3e71] [cursor=pointer]'
+          - 'button "颜色 #651FFF" [ref=f3e72] [cursor=pointer]'
+          - 'button "颜色 #D500F9" [ref=f3e73] [cursor=pointer]'
+      - generic [ref=f3e74]:
+        - generic [ref=f3e75]: 笔触
+        - generic [ref=f3e76]:
+          - button "细" [ref=f3e77] [cursor=pointer]
+          - button "中" [ref=f3e80] [cursor=pointer]
+          - button "粗" [ref=f3e83] [cursor=pointer]
+      - generic [ref=f3e86]:
+        - generic [ref=f3e87]: 操作
+        - button "↩️ 撤销 (Ctrl+Z)" [disabled] [ref=f3e88] [cursor=pointer]
+        - button "↪️ 重做 (Ctrl+Y)" [disabled] [ref=f3e89] [cursor=pointer]
+        - button "🗑️ 清空画布" [ref=f3e90] [cursor=pointer]

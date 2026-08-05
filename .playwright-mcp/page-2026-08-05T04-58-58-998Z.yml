@@ -1,0 +1,17 @@
+- generic [ref=f4e29]:
+  - heading "📊 第 2 轮结束" [level=2] [ref=f4e138]
+  - paragraph [ref=f4e139]:
+    - text: 答案是：
+    - strong [ref=f4e140]: 花朵
+  - paragraph [ref=f4e142]: 📏 字数对了，但内容不对
+  - generic [ref=f4e143]:
+    - generic [ref=f4e144]: 第 2/5 轮
+    - generic [ref=f4e145]:
+      - generic [ref=f4e146]:
+        - generic [ref=f4e147]: 你
+        - generic [ref=f4e148]: "1"
+      - generic [ref=f4e149]: VS
+      - generic [ref=f4e150]:
+        - generic [ref=f4e151]: AI
+        - generic [ref=f4e152]: "1"
+  - button "下一轮 ➡️" [ref=f4e153] [cursor=pointer]

@@ -41,6 +41,3 @@ coverage/
 *.swp
 *.swo
 *~
-
-# Playwright MCP session artifacts
-.playwright-mcp/

@@ -232,6 +232,9 @@ export function useSinglePlayer() {
   const [state, dispatch] = useReducer(reducer, initialState);
   const canvasRef = useRef<{ getImageDataURL: () => string; clear: () => void; isEmpty: () => boolean } | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // 保存最新的 state，供 useCallback 内读取，避免把 state 放进依赖数组导致回调每次重建
+  const stateRef = useRef<SinglePlayerState>(initialState);
+  stateRef.current = state;
 
   // ─── Timer ─────────────────────────────────────
 
@@ -300,7 +303,7 @@ export function useSinglePlayer() {
   );
 
   const submitDrawing = useCallback(async () => {
-    const game = (state as SinglePlayerState).game;
+    const game = stateRef.current.game;
     if (!game || game.status !== 'drawing') return;
 
     const imageDataUrl = canvasRef.current?.getImageDataURL();
@@ -326,11 +329,11 @@ export function useSinglePlayer() {
         error: err instanceof Error ? err.message : 'AI 识别失败',
       });
     }
-  }, [state, stopTimer]);
+  }, [stopTimer]);
 
   const submitGuess = useCallback(
     async (text: string) => {
-      const game = (state as SinglePlayerState).game;
+      const game = stateRef.current.game;
       if (!game || game.status !== 'guessing') return;
 
       dispatch({ type: 'SUBMIT_GUESS' });
@@ -353,11 +356,11 @@ export function useSinglePlayer() {
 
       dispatch({ type: 'GUESS_RESULT', isCorrect, feedback, score });
     },
-    [state, stopTimer]
+    [stopTimer]
   );
 
   const nextRound = useCallback(async () => {
-    const game = (state as SinglePlayerState).game;
+    const game = stateRef.current.game;
     if (!game) return;
 
     if (game.currentRound >= game.totalRounds) {
@@ -396,7 +399,7 @@ export function useSinglePlayer() {
         error: err instanceof Error ? err.message : '获取词汇失败',
       });
     }
-  }, [state, startTimer]);
+  }, [startTimer]);
 
   const resetGame = useCallback(() => {
     stopTimer();
@@ -406,7 +409,7 @@ export function useSinglePlayer() {
 
   /** AI 画轮次：调用后端生成笔画轨迹，返回笔画供页面在 Canvas 上绘制。 */
   const generateAiDrawing = useCallback(async (): Promise<AIDrawStroke[]> => {
-    const game = (state as SinglePlayerState).game;
+    const game = stateRef.current.game;
     if (!game) return [];
 
     const currentRound = game.rounds[game.rounds.length - 1];
@@ -424,7 +427,7 @@ export function useSinglePlayer() {
       });
       return [];
     }
-  }, [state, startTimer]);
+  }, [startTimer]);
 
   // ─── Current Round Info ────────────────────────
 
