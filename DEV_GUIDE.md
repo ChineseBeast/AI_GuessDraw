@@ -4,7 +4,9 @@
 
 **你画我猜 AI（Draw & Guess AI）** — AI 驱动的你画我猜游戏，支持单机、联机、故事三种模式。当前版本 v0.3.0。
 
-仓库：`github.com:ChineseBeast/AI_GuessDraw.git`，分支 `main`。
+仓库：`github.com:ChineseBeast/AI_GuessDraw.git`。当前开发分支 `dev-pqx`（领先 `main` 一个提交 `326be6e`，核心改动为用真实"公司 API"替换单机 mock AI）；`main` 为稳定分支。
+
+> ⚠️ 本文档已按 `dev-pqx` 实际源码校对。更详细的审计结论与已知问题清单见 [`HANDOVER.md`](./HANDOVER.md)（两者一致，以 HANDOVER 为权威）。
 
 ---
 
@@ -142,18 +144,19 @@ Implement                      →  编码
 
 ## 当前实现状态
 
-### 单机模式（完整可玩，AI 识别/绘画均接入真实 minimax-m3）
+### 单机模式（5 轮制，两条 AI 流程均已端到端接通）
 
-流程：选难度 → 画布绘画 → 提交 → AI 识别猜词 → 轮换角色（用户画/AI画）→ 计分结算 → 5 轮决胜负。
+流程：选难度 → 画布绘画 → 提交 → AI 识别猜词 → 轮换角色（`user_draws`/`ai_draws` 按轮次奇偶交替）→ 计分结算 → 5 轮决胜负。
 
-**AI 识别已接入真实模型**（minimax-m3 多模态）：
-- `apps/ai-service/src/services/minimax_service.py` 调用 minimax-m3 Chat Completion API 识别画作（PNG 自动转 JPEG，多层容错解析 Top-3 猜测）
+**我画AI猜（`user_draws`，运行时可用 ✅）**
+- `apps/ai-service/src/services/minimax_service.py` 调用 minimax-m3 Chat Completion API 识别画作（Canvas PNG 自动转 JPEG——火山方舟端点拒绝 PNG，多层容错解析 Top-3 猜测，`max_tokens=1024`）
 - server `SinglePlayerService.recognize()` 经 HTTP 转发到 ai-service（35s 超时，503 时抛 `AI_SERVICE_UNAVAILABLE`）
 
-**AI 绘画（AI 画用户猜）已实现**：
-- `apps/ai-service/src/services/draw_service.py` 让大模型规划简笔画**笔画轨迹**（3-15 笔），非文生图
+**AI画我猜（`ai_draws`，代码完整但运行时频繁失败 ⚠️）**
+- `apps/ai-service/src/services/draw_service.py` 让大模型规划简笔画**笔画轨迹**（3-15 笔，`max_tokens=4096`），非文生图
 - server `SinglePlayerService.generateDrawing()` 转发到 ai-service（60s 超时）
-- Web 端 ai_draws 回合调用 `AIService.generateDrawing()`，Canvas `loadStrokes()` 动画回放 AI 笔画，随后用户猜词
+- Web 端 ai_draws 回合调用 `AIService.generateDrawing()`，Canvas `loadStrokes(strokes, {animate:true})` 动画回放 AI 笔画，随后用户猜词（客户端精确字符串匹配 `text.trim() === targetWord`）
+- **运行时失败原因**：minimax-m3 是推理模型（先吐 `reasoning_content`），输出大型坐标 JSON 常被 `finish_reason=length` 截断 → 解析得空 → `DrawError('无法从模型输出中解析笔画')` → 503。代码层面无任何禁用/桩/功能开关，全链路接通；失败是模型输出行为，非代码缺陷。可选修复：换更擅长结构化输出的模型、减小笔画数/点数、改用文生图模型、或加降级兜底。
 
 ### 数据流（单机模式）
 
@@ -250,6 +253,22 @@ const API_ROUTES = {
 - 依赖含 `httpx`（HTTP 客户端）+ `Pillow`（图片转码），API key 经 `.env`/环境变量注入
 - NestJS server 的 `SinglePlayerService.recognize()/generateDrawing()` 已改为 HTTP 调用 ai-service
 
+### 运行前必配（关键）
+
+仓库只提交了 `.env.example`，**无 `.env`、无实时密钥**，运行前需自备：
+
+```bash
+# apps/ai-service/.env
+MINIMAX_API_KEY=<你的火山方舟 API key>
+MINIMAX_BASE_URL=https://ark.cn-beijing.volces.com/api/coding/v3   # 默认值
+MINIMAX_MODEL=minimax-m3                                            # 默认值
+```
+
+```bash
+# apps/server/.env
+AI_SERVICE_URL=http://localhost:8000
+```
+
 ### 接入路径（已完成）
 
 1. **ai-service 端**：`/api/v1/ai/recognize` 接收 `AIRecognizeRequest`，调用 minimax-m3 多模态 API 识别图片，返回 `AIRecognizeResponse`
@@ -259,9 +278,10 @@ const API_ROUTES = {
 
 ### minimax-m3 模型信息
 
-- minimax-m3 是 MiniMax 的多模态大模型，支持图像理解
-- API 文档：https://www.minimaxi.com/document
-- 需要通过 HTTP 调用其 Chat Completion API，传入图片 base64 + prompt
+- "公司 API" = 字节火山方舟（Volcano Ark）OpenAI 兼容端点 `https://ark.cn-beijing.volces.com/api/coding/v3`，服务模型 `minimax-m3`（向 `{MINIMAX_BASE_URL}/chat/completions` 发起请求）
+- 代码保留 `MINIMAX_*` 命名与 `minimax_service.py`，但实际 provider 是火山方舟，非 MiniMax 官方 `https://api.minimaxi.com/v1`（后者在 `.env.example` 作为可替代方案记录）
+- minimax-m3 为多模态推理模型，支持图像理解（识别）与文本结构化输出（笔画轨迹 JSON）
+- 需要通过 HTTP 调用其 Chat Completion API，传入图片 base64 + prompt；缺 key 时两服务分别抛 `MiniMaxError` / `DrawError` → 路由返回 503 `AI_SERVICE_UNAVAILABLE`
 
 ---
 
@@ -289,7 +309,8 @@ const API_ROUTES = {
 - packages/shared 的 types 指向源码 src/index.ts，消费方 tsconfig 不要加 references
 
 当前状态：
-- 单机模式完整可玩：AI 识别已接入真实 minimax-m3（apps/ai-service/src/services/minimax_service.py），AI 绘画未实现（apps/ai-service/src/services/draw_service.py 生成笔画轨迹 + 前端 Canvas 动画回放）
+- 单机模式两条 AI 流程均已端到端接通：我画AI猜（user_draws，运行时可用）经 minimax-m3 识别；AI画我猜（ai_draws）经 minimax-m3 生成笔画轨迹 + 前端 Canvas 动画回放，但运行时因模型输出大型坐标 JSON 常被 finish_reason=length 截断而频繁失败（代码无禁用开关）
+- AI provider 为字节火山方舟（Volcano Ark）的 minimax-m3，代码沿用 MINIMAX_* 命名；运行前需配 apps/ai-service/.env（MINIMAX_API_KEY 等）与 apps/server/.env（AI_SERVICE_URL）
 - 联机模式基本完整（WebSocket 房间 + 画布同步 + 猜词）
 - 用户系统 V1（内存存储，JWT 鉴权）
 - 单机模式待完善：猜词交互/超时、计分规则（1 分制 vs spec 10 分制）、AI 服务降级重试、未完成测试
@@ -332,9 +353,15 @@ ai画我猜 + 完善单机模式。具体要求：
 | 单机 service（转发 ai-service） | `apps/server/src/modules/singleplayer/singleplayer.service.ts` |
 | 单机类型 | `apps/server/src/modules/singleplayer/singleplayer.types.ts` |
 | WebSocket 网关 | `apps/server/src/gateway/room.gateway.ts` |
+| 游戏引擎 | `apps/server/src/gateway/game-engine.service.ts` |
+| 词库服务 | `apps/server/src/gateway/word.service.ts` |
 | 认证模块 | `apps/server/src/modules/auth/` |
 | 排行榜模块 | `apps/server/src/modules/leaderboard/` |
 | AI 服务入口 | `apps/ai-service/src/main.py` |
+| AI 服务路由 | `apps/ai-service/src/routers/ai.py` |
+| 识别服务（minimax-m3） | `apps/ai-service/src/services/minimax_service.py` |
+| 绘画服务（笔画生成） | `apps/ai-service/src/services/draw_service.py` |
+| AI 服务配置 | `apps/ai-service/src/config.py` |
 | AI 服务依赖 | `apps/ai-service/requirements.txt` / `pyproject.toml` |
 | 共享类型 | `packages/shared/src/types/` |
 | 共享常量 | `packages/shared/src/constants/` |

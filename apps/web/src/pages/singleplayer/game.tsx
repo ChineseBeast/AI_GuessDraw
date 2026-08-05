@@ -198,8 +198,8 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
     );
   }
 
-  // AI 识别中
-  if (state.loading && state.game?.status === 'drawing') {
+  // AI 识别中（仅我画AI猜：用户提交后等待识别结果）
+  if (state.loading && state.game?.status === 'drawing' && isUserDrawing) {
     return (
       <div style={{ padding: '2rem', textAlign: 'center' }}>
         <h2>🤖 AI 识别中...</h2>
@@ -439,6 +439,13 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
               {state.loading && (
                 <p style={{ textAlign: 'center', color: '#999', marginTop: '0.5rem', fontSize: '0.9rem' }}>
                   🤖 AI 正在构思并绘制它的画作，请稍候...
+                </p>
+              )}
+
+              {/* 兜底笔画提示：AI 模型输出失败时回退为简笔画，笔画少于 3 条 */}
+              {!state.loading && state.aiStrokes.length > 0 && state.aiStrokes.length < 3 && (
+                <p style={{ textAlign: 'center', color: '#999', marginTop: '0.5rem', fontSize: '0.85rem' }}>
+                  AI 画技不佳，尽力猜 😅
                 </p>
               )}
 
