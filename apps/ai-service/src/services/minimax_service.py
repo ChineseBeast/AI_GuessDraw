@@ -33,26 +33,24 @@ class MiniMaxError(Exception):
     """MiniMax 调用过程中的异常（网络错误、配置缺失、响应解析失败等）。"""
 
 
-def _to_jpeg_data_uri(image_input: str) -> str:
-    """将任意输入图片统一转为 JPEG data URI。
+def _to_jpeg_normalized(image_input: str) -> tuple[str, str]:
+    """将任意输入图片统一转为 JPEG，返回 (media_type, raw_base64)。
 
-    火山方舟 coding plan 的 minimax-m3 仅支持 JPEG（或公网 URL）的 base64 图片，
-    直接传 PNG base64 会被拒绝（400 InvalidParameter）。前端 Canvas 导出的是 PNG，
-    因此这里解码后重新编码为 JPEG，并转成 RGB（避免带 alpha 通道的 PNG 在 JPEG 中报错）。
+    OpenAI 路径与 Anthropic 路径共用此归一化：OpenAI 包成 data URI，
+    Anthropic 直接用 raw base64 + media_type 嵌入 source。
 
     支持输入：
     - `data:image/...;base64,xxxx` data URI
     - 纯 base64 字符串（默认按 PNG/JPEG 尝试解码）
-    - `http(s)://...` 公网 URL（原样返回，不转码）
+    - `http(s)://...` 公网 URL（media_type 留空，调用方需自备 URL 透传分支）
     """
-    # 公网 URL 直接透传（模型本身支持）
+    # 公网 URL：调用方需单独处理（OpenAI 直接透传 URL，Anthropic 需 fetch 转 base64）
     if image_input.startswith(("http://", "https://")):
-        return image_input
+        return ("", image_input)
 
     # 剥离 data URI 前缀，拿到纯 base64
     raw = image_input
     if raw.startswith("data:"):
-        # 形如 data:image/png;base64,xxxx
         comma_idx = raw.find(",")
         if comma_idx == -1:
             raise MiniMaxError("图片 data URI 格式无效：缺少逗号分隔符")
@@ -80,7 +78,15 @@ def _to_jpeg_data_uri(image_input: str) -> str:
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=90)
     jpeg_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return f"data:image/jpeg;base64,{jpeg_b64}"
+    return ("image/jpeg", jpeg_b64)
+
+
+def _to_jpeg_data_uri(image_input: str) -> str:
+    """OpenAI 路径用：归一化为 JPEG data URI。"""
+    media_type, raw = _to_jpeg_normalized(image_input)
+    if not media_type:  # 公网 URL
+        return raw
+    return f"data:{media_type};base64,{raw}"
 
 
 def _build_messages(image_input: str) -> list[dict[str, Any]]:
@@ -176,11 +182,64 @@ def _parse_guesses(content: str) -> list[AIGuess]:
     return guesses
 
 
-async def recognize_drawing(image_base64: str) -> list[AIGuess]:
-    """调用 MiniMax 多模态 API 识别图片，返回候选词列表（按置信度排序）。"""
-    if not settings.minimax_api_key:
-        raise MiniMaxError("MINIMAX_API_KEY 未配置")
+async def recognize_drawing(image_base64: str, provider: str = "qwen") -> list[AIGuess]:
+    """调用多模态 API 识别图片，返回候选词列表（按置信度排序）。
 
+    provider="qwen"：OpenAI 兼容端点（chat/completions）
+    provider="minimax"：Anthropic 协议端点（v1/messages）
+    """
+    # 构造请求（按 provider 分支）与解析响应，文本内容统一交给 _parse_guesses
+    if provider == "minimax":
+        if not settings.minimax_anthropic_api_key:
+            raise MiniMaxError("MINIMAX_ANTHROPIC_API_KEY 未配置")
+        url, headers, payload = _build_anthropic_recognize_request(image_base64)
+    else:
+        if not settings.minimax_api_key:
+            raise MiniMaxError("MINIMAX_API_KEY 未配置")
+        url, headers, payload = _build_openai_recognize_request(image_base64)
+
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(90.0, connect=5.0)) as client:
+            # 用 asyncio.wait_for 强制 90s 总超时（httpx read timeout 只限单次读取间隔，
+            # 流式响应持续有 chunk 时不触发，需 wait_for 限制总时长，防真卡死）
+            resp = await asyncio.wait_for(client.post(url, headers=headers, json=payload), timeout=90.0)
+    except asyncio.TimeoutError:
+        logger.warning("AI 识别调用总耗时超 90s")
+        raise MiniMaxError("AI 识别超时，请稍后重试") from None
+    except httpx.HTTPError as exc:
+        logger.error("调用 AI 识别 API 网络错误: %s", exc)
+        raise MiniMaxError(f"调用 AI 识别 API 网络错误: {exc}") from exc
+
+    if resp.status_code != 200:
+        body = resp.text[:300] if resp.text else ""
+        logger.error("AI 识别 API 返回非 200: %s, 响应: %s", resp.status_code, body)
+        raise MiniMaxError(
+            f"AI 识别 API 返回非 200 状态码: {resp.status_code}, 响应: {body}"
+        )
+
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as exc:
+        raise MiniMaxError(f"解析 AI 识别响应失败: {exc}") from exc
+
+    content, truncated = _extract_text(data, provider)
+    if truncated:
+        logger.warning(
+            "AI 识别输出因 max_tokens 截断，原始内容: %r", content[:300]
+        )
+
+    guesses = _parse_guesses(content)
+    if not guesses:
+        logger.error("无法从模型输出中解析候选词，原始内容: %r", content[:500])
+        raise MiniMaxError("无法从模型输出中解析候选词")
+
+    # 按置信度降序
+    guesses.sort(key=lambda g: g.confidence, reverse=True)
+    return guesses
+
+
+def _build_openai_recognize_request(image_base64: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """构造 OpenAI 兼容端点（qwen）的识别请求。"""
     url = f"{settings.minimax_base_url}/chat/completions"
     headers = {
         "Authorization": f"Bearer {settings.minimax_api_key}",
@@ -194,57 +253,53 @@ async def recognize_drawing(image_base64: str) -> list[AIGuess]:
         "max_tokens": 1024,
         "temperature": 0.7,
     }
+    return url, headers, payload
 
-    try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
-            # 用 asyncio.wait_for 强制 60s 总超时（httpx read timeout 只限单次读取间隔，
-            # 流式响应持续有 chunk 时不触发，需 wait_for 限制总时长，防真卡死）
-            resp = await asyncio.wait_for(client.post(url, headers=headers, json=payload), timeout=60.0)
-    except asyncio.TimeoutError:
-        logger.warning("AI 识别调用总耗时超 60s")
-        raise MiniMaxError("AI 识别超时，请稍后重试") from None
-    except httpx.HTTPError as exc:
-        logger.error("调用 MiniMax API 网络错误: %s", exc)
-        raise MiniMaxError(f"调用 MiniMax API 网络错误: {exc}") from exc
 
-    if resp.status_code != 200:
-        # 把响应体摘要带入错误信息，便于排查（如模型不支持图片格式、配额不足等）
-        body = resp.text[:300] if resp.text else ""
-        logger.error("MiniMax API 返回非 200: %s, 响应: %s", resp.status_code, body)
-        raise MiniMaxError(
-            f"MiniMax API 返回非 200 状态码: {resp.status_code}, 响应: {body}"
+def _build_anthropic_recognize_request(image_base64: str) -> tuple[str, dict[str, str], dict[str, Any]]:
+    """构造 Anthropic 协议端点（minimax）的识别请求。"""
+    url = f"{settings.minimax_anthropic_base_url}/v1/messages"
+    headers = {
+        "x-api-key": settings.minimax_anthropic_api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+    media_type, raw_b64 = _to_jpeg_normalized(image_base64)
+    # Anthropic 图片用 source.base64 结构（非 image_url data URI）
+    content: list[dict[str, Any]] = [
+        {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": raw_b64}},
+        {"type": "text", "text": RECOGNIZE_PROMPT},
+    ]
+    payload = {
+        "model": settings.minimax_anthropic_model,
+        "max_tokens": 1024,
+        "messages": [{"role": "user", "content": content}],
+    }
+    return url, headers, payload
+
+
+def _extract_text(data: dict[str, Any], provider: str) -> tuple[str, bool]:
+    """从响应里提取模型输出的文本，返回 (text, truncated)。
+
+    OpenAI：choices[0].message.content（字符串或分段数组），finish_reason=="length" 表截断
+    Anthropic：content 数组里 type=="text" 的 text 拼接，stop_reason=="max_tokens" 表截断
+    """
+    if provider == "minimax":
+        blocks = data.get("content") or []
+        text = "".join(
+            b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"
         )
+        truncated = data.get("stop_reason") == "max_tokens"
+        return text, truncated
 
-    try:
-        data = resp.json()
-    except json.JSONDecodeError as exc:
-        raise MiniMaxError(f"解析 MiniMax 响应失败: {exc}") from exc
-
-    # OpenAI 兼容格式: choices[0].message.content
+    # OpenAI 兼容格式
     choices = data.get("choices") or []
     if not choices:
-        raise MiniMaxError("MiniMax 响应中没有 choices")
+        return "", False
     choice = choices[0]
-    finish_reason = choice.get("finish_reason")
     content = choice.get("message", {}).get("content", "")
-    # 部分模型 content 是分段数组，拼接所有 text
     if isinstance(content, list):
         content = "".join(
             part.get("text", "") for part in content if isinstance(part, dict)
         )
-
-    if finish_reason == "length":
-        # 输出被 max_tokens 截断，JSON 可能不完整；记录警告，依赖 _parse_guesses 兜底提取
-        logger.warning(
-            "MiniMax 输出因 max_tokens 截断(finish_reason=length)，原始内容: %r",
-            content[:300],
-        )
-
-    guesses = _parse_guesses(content)
-    if not guesses:
-        logger.error("无法从模型输出中解析候选词，原始内容: %r", content[:500])
-        raise MiniMaxError("无法从模型输出中解析候选词")
-
-    # 按置信度降序
-    guesses.sort(key=lambda g: g.confidence, reverse=True)
-    return guesses
+    return content or "", choice.get("finish_reason") == "length"

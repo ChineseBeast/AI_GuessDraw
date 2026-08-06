@@ -6,6 +6,7 @@ node_modules/
 dist/
 build/
 .turbo/
+*.tsbuildinfo
 
 # Environment
 .env
@@ -36,6 +37,7 @@ venv/
 
 # Testing
 coverage/
+.playwright-mcp/
 
 # Misc
 *.swp

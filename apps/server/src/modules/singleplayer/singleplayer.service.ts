@@ -54,8 +54,8 @@ const AI_RECOGNIZE_ENDPOINT = `${AI_SERVICE_URL}/api/v1/ai/recognize`;
 /** ai-service generate-drawing 路由 */
 const AI_GENERATE_DRAWING_ENDPOINT = `${AI_SERVICE_URL}/api/v1/ai/generate-drawing`;
 
-/** 调用 ai-service 的超时时间（ms）：千问 flash 识别/绘画最坏 60s + 兜底余量 */
-const AI_SERVICE_TIMEOUT_MS = 75_000;
+/** 调用 ai-service 的超时时间（ms）：千问 flash 识别/绘画最坏 90s + 兜底余量 */
+const AI_SERVICE_TIMEOUT_MS = 105_000;
 
 /** ai-service 错误响应体结构（FastAPI HTTPException detail） */
 interface AIServiceErrorBody {
@@ -94,7 +94,8 @@ export class SinglePlayerService {
   async recognize(
     imageBase64: string,
     targetWord: string,
-    difficulty: Difficulty
+    difficulty: Difficulty,
+    provider: string = 'qwen'
   ): Promise<AIRecognizeResponse> {
     // 验证图片不为空
     if (!imageBase64 || imageBase64.length < 100) {
@@ -108,7 +109,7 @@ export class SinglePlayerService {
       const res = await fetch(AI_RECOGNIZE_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: imageBase64, targetWord, difficulty }),
+        body: JSON.stringify({ image: imageBase64, targetWord, difficulty, provider }),
         signal: controller.signal,
       });
 
@@ -151,15 +152,15 @@ export class SinglePlayerService {
    * AI 绘画生成：调用 ai-service 根据目标词生成笔画轨迹（绘画行为）。
    * ai-service 不可用时抛出 AI_SERVICE_UNAVAILABLE。
    */
-  async generateDrawing(targetWord: string, difficulty: Difficulty): Promise<unknown> {
+  async generateDrawing(targetWord: string, difficulty: Difficulty, provider: string = 'qwen'): Promise<unknown> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 75_000); // 千问 flash 绘画 ~22s，最坏 60s + 兜底余量
+    const timeout = setTimeout(() => controller.abort(), AI_SERVICE_TIMEOUT_MS); // 千问 flash 绘画 ~22s，最坏 90s + 兜底余量
 
     try {
       const res = await fetch(AI_GENERATE_DRAWING_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetWord, difficulty }),
+        body: JSON.stringify({ targetWord, difficulty, provider }),
         signal: controller.signal,
       });
 

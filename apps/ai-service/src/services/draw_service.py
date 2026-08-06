@@ -23,24 +23,36 @@ logger = logging.getLogger("ai_service.draw")
 CANVAS_WIDTH = 800
 CANVAS_HEIGHT = 600
 
-DRAW_PROMPT = f"""你是"你画我猜"游戏的 AI 画家。根据词语规划简笔画笔画轨迹，前端在 {CANVAS_WIDTH}x{CANVAS_HEIGHT} 画布上重现。
+DRAW_PROMPT = f"""你是"你画我猜"游戏的 AI 画家，擅长画可辨识的简笔画。前端在 {CANVAS_WIDTH}x{CANVAS_HEIGHT} 画布上重现你的笔画。
 
-要求：
-1. 用 {{stroke_count}} 条笔画画出该事物，每条笔画是连续坐标点
-2. 坐标范围 x: 0~{CANVAS_WIDTH}，y: 0~{CANVAS_HEIGHT}，主体居中
-3. 每条笔画 2~15 个点，只取拐点即可，点尽量稀疏
-4. color 用十六进制（如 "#000000"），width 用 2~6 的数字
-5. 只返回一个 JSON 数组，不要任何解释、不要推理过程
+画法要求：
+1. 先提炼该事物的 3 个最鲜明视觉特征，据此构图（如苹果=红色圆身+顶部果柄+一片叶子；鸟=尖嘴向上+侧身收拢翅膀+站在树枝上）
+2. 先在脑中分解视觉部件，每个部件用一条或多条笔画
+3. 用 {{stroke_count}} 条笔画，每条笔画 5~30 个点（点越密曲线越圆滑，画圆弧时多点才能画圆）
+4. 主体居中、大小适中（占画布 1/3~1/2），各部件比例正确、位置关系对
+5. 绘画风格统一：简洁线条 + 鲜明色彩，避免过多细节，让核心元素一目了然
+6. 若是名词画具有辨识度的物体；若是动作/动词，画出动作场景（如"跳舞"画一个舞姿的人）
+7. 画出来的图必须能让人一眼认出是什么——抓住该事物的标志性特征，特征明显且无歧义
+8. color 用十六进制（如 "#000000" 黑、"#E74C3C" 红、"#2D9A3E" 绿），width 3~5
 
-格式（严格遵守，点用 [x,y] 数组）：
+只返回 JSON 数组，点用 [x,y] 数组，不要解释：
 [{{"points":[[400,300],[380,310]],"color":"#000000","width":4}}]"""
 
 # 不同难度的笔画复杂度：简单少笔画、困难多笔画
 _DIFFICULTY_STROKES = {
-    "easy": "3~5",
-    "medium": "5~7",
-    "hard": "7~10",
+    "easy": "5~10",
+    "medium": "8~15",
+    "hard": "12~25",
 }
+
+# 第一步：生成「绘画提示词」的模板（用户指定）
+DRAW_PROMPT_TEMPLATE = """在接下来的对话中，每当您需要画一幅简笔画来帮助我猜词时，请按以下步骤自动操作：
+1. 为要画的词语提炼出 3 个最鲜明的视觉特征。
+2. 生成一个包含这些特征的绘画提示词，格式为：[提示词内容]。
+3. 提示词中需包含：主体描述、动作姿态、线条风格（清晰简洁）、背景（纯白）。
+4. 请确保提示词生成的图像对猜词有帮助，特征明显且无歧义。
+示例输出：绘画提示词：一只站在树枝上的鸟，侧身，尖嘴向上，翅膀收拢，黑色轮廓线，白色背景。
+现在，请按照此规则执行。"""
 
 
 class DrawError(Exception):
@@ -167,69 +179,105 @@ def _parse_strokes(content: str) -> list[AIDrawStroke]:
     return strokes
 
 
-async def _call_model(target_word: str, difficulty: str, reasoning_effort: str | None) -> list[AIDrawStroke]:
-    """单次调用 minimax 生成笔画轨迹，返回解析到的笔画（失败返回空列表，由调用方决定兜底）。
+async def _send_text_request(
+    prompt: str, provider: str, max_tokens: int, reasoning_effort: str | None = None, timeout: float = 60.0
+) -> str:
+    """向指定 provider 发送单次文本请求，返回模型输出的文本（失败返回空字符串）。
 
-    `difficulty` 控制笔画复杂度（easy 3-5 笔 / medium 5-7 笔 / hard 7-10 笔），
-    影响生成耗时——简单难度笔画少、出图快，困难难度笔画多、出图慢。
-    `reasoning_effort="low"` 用于抑制推理模型先吐 `reasoning_content` 占满 token 的行为；
-    若端点不支持该参数（返回 400），此处当作普通错误吞掉，由调用方去掉参数重试。
+    provider="qwen"：OpenAI 兼容端点；provider="minimax"：Anthropic 协议端点。
+    `reasoning_effort="low"` 仅 qwen 用，抑制推理模型先吐 reasoning_content 占满 token。
     """
-    url = f"{settings.minimax_base_url}/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {settings.minimax_api_key}",
-        "Content-Type": "application/json",
-    }
-    stroke_count = _DIFFICULTY_STROKES.get(difficulty, "3~8")
-    prompt = DRAW_PROMPT.replace("{stroke_count}", stroke_count)
-    payload: dict[str, Any] = {
-        "model": settings.minimax_model,
-        "messages": [
-            {
-                "role": "user",
-                "content": f"{prompt}\n\n请画：「{target_word}」",
-            }
-        ],
-        "max_tokens": 8192,
-        "temperature": 0.5,
-    }
-    if reasoning_effort:
-        payload["reasoning_effort"] = reasoning_effort
+    if provider == "minimax":
+        if not settings.minimax_anthropic_api_key:
+            raise DrawError("MINIMAX_ANTHROPIC_API_KEY 未配置")
+        url = f"{settings.minimax_anthropic_base_url}/v1/messages"
+        headers = {
+            "x-api-key": settings.minimax_anthropic_api_key,
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json",
+        }
+        payload: dict[str, Any] = {
+            "model": settings.minimax_anthropic_model,
+            "max_tokens": max_tokens,
+            "messages": [{"role": "user", "content": [{"type": "text", "text": prompt}]}],
+        }
+    else:
+        if not settings.minimax_api_key:
+            raise DrawError("MINIMAX_API_KEY 未配置")
+        url = f"{settings.minimax_base_url}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {settings.minimax_api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": settings.minimax_model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0.5,
+        }
+        if reasoning_effort:
+            payload["reasoning_effort"] = reasoning_effort
 
     try:
-        async with httpx.AsyncClient(timeout=httpx.Timeout(60.0, connect=5.0)) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(timeout, connect=5.0)) as client:
             # 用 asyncio.wait_for 强制总超时（httpx 的 read timeout 只限制单次读取间隔，
-            # 千问流式响应持续有 chunk 时不触发，需 wait_for 限制总时长，防真卡死）
-            resp = await asyncio.wait_for(client.post(url, headers=headers, json=payload), timeout=60.0)
+            # 流式响应持续有 chunk 时不触发，需 wait_for 限制总时长，防真卡死）
+            resp = await asyncio.wait_for(client.post(url, headers=headers, json=payload), timeout=timeout)
     except asyncio.TimeoutError:
-        logger.warning("AI 绘画调用总耗时超 60s，走兜底")
-        return []
+        logger.warning("AI 绘画调用总耗时超 %ss", timeout)
+        return ""
     except httpx.HTTPError as exc:
         logger.error("调用 AI 绘画 API 网络错误: %s", exc)
-        return []
+        return ""
 
     if resp.status_code != 200:
         body = resp.text[:300] if resp.text else ""
         logger.error("AI 绘画 API 返回非 200: %s, 响应: %s", resp.status_code, body)
-        return []
+        return ""
 
     try:
         data = resp.json()
     except json.JSONDecodeError as exc:
         logger.error("解析 AI 绘画响应失败: %s", exc)
-        return []
+        return ""
 
-    choices = data.get("choices") or []
-    if not choices:
-        logger.error("AI 绘画响应中没有 choices")
-        return []
-    content = choices[0].get("message", {}).get("content", "")
-    if isinstance(content, list):
-        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+    content, _ = _extract_text(data, provider)
+    return content
 
-    finish_reason = choices[0].get("finish_reason")
-    if finish_reason == "length":
-        logger.warning("AI 绘画输出因 max_tokens 截断(finish_reason=length)")
+
+async def _generate_draw_prompt(target_word: str, provider: str) -> str:
+    """第一步：按模板让模型为词语生成「绘画提示词」（描述主体/动作/线条/背景的文字）。"""
+    prompt = f"{DRAW_PROMPT_TEMPLATE}\n\n请为「{target_word}」生成绘画提示词。"
+    text = await _send_text_request(prompt, provider, max_tokens=512, timeout=30.0)
+    if not text:
+        logger.warning("生成绘画提示词失败，走兜底直接画")
+    return text
+
+
+async def _call_model(
+    target_word: str, difficulty: str, provider: str, reasoning_effort: str | None
+) -> list[AIDrawStroke]:
+    """两步生成笔画轨迹，返回解析到的笔画（失败返回空列表，由调用方决定兜底）。
+
+    第一步：生成绘画提示词（描述主体/动作/线条）；第二步：据提示词输出笔画 JSON。
+    `difficulty` 控制笔画复杂度（easy 5-10 / medium 8-15 / hard 12-25 笔）。
+    `provider`："qwen" 走 OpenAI 兼容端点，"minimax" 走 Anthropic 协议端点。
+    """
+    # 第一步：生成绘画提示词（30s 超时，保证两步合计 < server 105s 超时）
+    draw_prompt_text = await _generate_draw_prompt(target_word, provider)
+
+    # 第二步：据提示词输出笔画
+    stroke_count = _DIFFICULTY_STROKES.get(difficulty, "5~10")
+    prompt = DRAW_PROMPT.replace("{stroke_count}", stroke_count)
+    if draw_prompt_text:
+        full_prompt = f"{prompt}\n\n绘画提示词：{draw_prompt_text}\n\n请严格按此提示词画「{target_word}」的简笔画。"
+    else:
+        # 提示词生成失败，退化为直接画
+        full_prompt = f"{prompt}\n\n请画：「{target_word}」"
+
+    content = await _send_text_request(full_prompt, provider, max_tokens=8192, reasoning_effort=reasoning_effort)
+    if not content:
+        return []
 
     strokes = _parse_strokes(content)
     if not strokes:
@@ -305,19 +353,51 @@ def _fallback_strokes(target_word: str) -> list[AIDrawStroke]:
     return strokes
 
 
-async def generate_drawing(target_word: str, difficulty: str = "easy") -> list[AIDrawStroke]:
-    """调用 minimax 生成目标词的笔画轨迹；模型输出失败则用兜底简笔画，保证链路不断。
+async def generate_drawing(
+    target_word: str, difficulty: str = "easy", provider: str = "qwen"
+) -> list[AIDrawStroke]:
+    """调用 AI 生成目标词的笔画轨迹；模型输出失败则用兜底简笔画，保证链路不断。
 
     `difficulty` 控制笔画复杂度：easy 3-5 笔 / medium 5-7 笔 / hard 7-10 笔。
+    `provider`："qwen" 走 OpenAI 兼容端点，"minimax" 走 Anthropic 协议端点。
     """
-    if not settings.minimax_api_key:
-        raise DrawError("MINIMAX_API_KEY 未配置")
+    if provider == "minimax":
+        if not settings.minimax_anthropic_api_key:
+            raise DrawError("MINIMAX_ANTHROPIC_API_KEY 未配置")
+    else:
+        if not settings.minimax_api_key:
+            raise DrawError("MINIMAX_API_KEY 未配置")
 
-    # 只调一次千问；reasoning_effort=low 抑制推理输出，端点不支持时 _call_model 会当普通错误吞掉。
-    strokes = await _call_model(target_word, difficulty=difficulty, reasoning_effort="low")
+    # 只调一次；qwen 用 reasoning_effort=low 抑制推理输出，minimax 无该参数。
+    strokes = await _call_model(
+        target_word, difficulty=difficulty, provider=provider, reasoning_effort="low"
+    )
     if strokes:
         return strokes
 
     # 失败即兜底简笔画，保证前端有可猜内容、链路不卡
     logger.warning("AI 绘画解析失败，使用兜底简笔画: %s", target_word)
     return _fallback_strokes(target_word)
+
+
+def _extract_text(data: dict[str, Any], provider: str) -> tuple[str, bool]:
+    """从响应里提取模型输出的文本，返回 (text, truncated)。
+
+    OpenAI：choices[0].message.content（字符串或分段数组），finish_reason=="length" 表截断
+    Anthropic：content 数组里 type=="text" 的 text 拼接，stop_reason=="max_tokens" 表截断
+    """
+    if provider == "minimax":
+        blocks = data.get("content") or []
+        text = "".join(
+            b.get("text", "") for b in blocks if isinstance(b, dict) and b.get("type") == "text"
+        )
+        return text, data.get("stop_reason") == "max_tokens"
+
+    choices = data.get("choices") or []
+    if not choices:
+        return "", False
+    choice = choices[0]
+    content = choice.get("message", {}).get("content", "")
+    if isinstance(content, list):
+        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+    return content or "", choice.get("finish_reason") == "length"

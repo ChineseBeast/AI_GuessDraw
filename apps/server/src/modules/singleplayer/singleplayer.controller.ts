@@ -1,21 +1,24 @@
 import { Controller, Post, Body, HttpCode, HttpException, HttpStatus } from '@nestjs/common';
 import { SinglePlayerService } from './singleplayer.service';
-import type { Difficulty } from '@draw-guess/shared';
+import type { Difficulty, Provider } from '@draw-guess/shared';
 
 interface RecognizeDto {
   image: string;
   targetWord: string;
   difficulty: Difficulty;
+  provider?: Provider;
 }
 
 interface WordDto {
   difficulty: Difficulty;
   excludeWords?: string[];
+  provider?: Provider;
 }
 
 interface DrawDto {
   targetWord: string;
   difficulty: Difficulty;
+  provider?: Provider;
 }
 
 @Controller('singleplayer')
@@ -25,11 +28,18 @@ export class SinglePlayerController {
   @Post('word')
   @HttpCode(200)
   getWord(@Body() dto: WordDto) {
-    const { difficulty, excludeWords = [] } = dto;
+    const { difficulty, excludeWords = [], provider = 'qwen' } = dto;
 
     if (!difficulty || !['easy', 'medium', 'hard'].includes(difficulty)) {
       throw new HttpException(
         { error: 'INVALID_REQUEST', message: '缺少或无效的 difficulty 参数' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    if (!['qwen', 'minimax'].includes(provider)) {
+      throw new HttpException(
+        { error: 'INVALID_REQUEST', message: '无效的 provider 参数' },
         HttpStatus.BAD_REQUEST,
       );
     }
@@ -41,7 +51,7 @@ export class SinglePlayerController {
   @Post('recognize')
   @HttpCode(200)
   async recognize(@Body() dto: RecognizeDto) {
-    const { image, targetWord, difficulty } = dto;
+    const { image, targetWord, difficulty, provider = 'qwen' } = dto;
 
     if (!image || !targetWord || !difficulty) {
       throw new HttpException(
@@ -57,6 +67,13 @@ export class SinglePlayerController {
       );
     }
 
+    if (!['qwen', 'minimax'].includes(provider)) {
+      throw new HttpException(
+        { error: 'INVALID_REQUEST', message: '无效的 provider 参数' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     // 检查图片大小 (Base64 字符串超过 6.6MB ≈ 5MB 原始图片)
     if (image.length > 7_000_000) {
       throw new HttpException(
@@ -66,7 +83,7 @@ export class SinglePlayerController {
     }
 
     try {
-      const result = await this.service.recognize(image, targetWord, difficulty);
+      const result = await this.service.recognize(image, targetWord, difficulty, provider);
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -95,7 +112,7 @@ export class SinglePlayerController {
   @Post('generate-drawing')
   @HttpCode(200)
   async generateDrawing(@Body() dto: DrawDto) {
-    const { targetWord, difficulty } = dto;
+    const { targetWord, difficulty, provider = 'qwen' } = dto;
 
     if (!targetWord) {
       throw new HttpException(
@@ -111,8 +128,15 @@ export class SinglePlayerController {
       );
     }
 
+    if (!['qwen', 'minimax'].includes(provider)) {
+      throw new HttpException(
+        { error: 'INVALID_REQUEST', message: '无效的 provider 参数' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
     try {
-      const result = await this.service.generateDrawing(targetWord, difficulty);
+      const result = await this.service.generateDrawing(targetWord, difficulty, provider);
       return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown error';

@@ -2,6 +2,7 @@ import React, { useRef, useEffect } from 'react';
 import { Canvas, type CanvasRef } from '@draw-guess/ui';
 import type { ToolState } from '@draw-guess/ui';
 import { DEFAULT_TOOL_STATE } from '@draw-guess/ui';
+import type { Provider } from '@draw-guess/shared';
 import { useSinglePlayer } from '../../hooks/useSinglePlayer';
 import { useAuth } from '../../hooks/useAuth';
 import { LeaderboardService } from '../../services/leaderboard.service';
@@ -11,16 +12,19 @@ import { ScoreBoard } from './components/ScoreBoard';
 
 interface SinglePlayerGameProps {
   difficulty: 'easy' | 'medium' | 'hard';
+  provider: Provider;
   onNavigateHome: () => void;
 }
 
-export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, onNavigateHome }) => {
+export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, provider, onNavigateHome }) => {
   const {
     state,
     canvasRef: hookCanvasRef,
     currentRound,
     isUserDrawing,
     isGameOver,
+    maxGuesses,
+    guessesRemaining,
     startGame,
     submitDrawing,
     submitGuess,
@@ -29,13 +33,16 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
     generateAiDrawing,
     setGuessText,
     clearError,
-  } = useSinglePlayer();
+  } = useSinglePlayer(provider);
 
   const { user, isAuthenticated } = useAuth();
   const localCanvasRef = useRef<CanvasRef>(null);
   const [toolState, setToolState] = React.useState<ToolState>(DEFAULT_TOOL_STATE);
   const [showEmptyWarning, setShowEmptyWarning] = React.useState(false);
   const scoreSubmittedRef = useRef(false);
+  const [flashCorrect, setFlashCorrect] = React.useState(false);
+  const [roundTransition, setRoundTransition] = React.useState(false);
+  const [hintVisible, setHintVisible] = React.useState(false);
 
   // AI 画轮次：进入 drawing 阶段后请求 AI 生成笔画并在 Canvas 上动画绘制
   const aiDrawTriggeredRef = useRef(false);
@@ -103,6 +110,15 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
       submitDrawing();
     }
   }, [state.timeRemaining, state.game?.status, isUserDrawing, submitDrawing]);
+
+  // AI 画回合猜对：触发正确闪烁动画
+  useEffect(() => {
+    if (state.game?.status === 'round_end' && !isUserDrawing && currentRound?.userGuessedCorrectly) {
+      setFlashCorrect(true);
+      const t = setTimeout(() => setFlashCorrect(false), 600);
+      return () => clearTimeout(t);
+    }
+  }, [state.game?.status, isUserDrawing, currentRound?.userGuessedCorrectly]);
 
   // 游戏结束
   if (isGameOver && state.game) {
@@ -274,7 +290,10 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
         />
 
         <button
-          onClick={() => nextRound()}
+          onClick={() => {
+            setRoundTransition(true);
+            setTimeout(() => { setRoundTransition(false); nextRound(); }, 800);
+          }}
           style={{
             marginTop: '1.5rem',
             padding: '0.75rem 2.5rem',
@@ -314,13 +333,7 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
           <span>{state.error}</span>
           <button
             onClick={clearError}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: '#c62828',
-              cursor: 'pointer',
-              fontSize: '1.2rem',
-            }}
+            style={{ background: 'none', border: 'none', color: '#c62828', cursor: 'pointer', fontSize: '1.2rem' }}
           >
             ✕
           </button>
@@ -347,6 +360,23 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
             </span>
             <Timer timeRemaining={state.timeRemaining} />
             <span>{isUserDrawing ? '🎨 你来画！' : '🤖 AI 在画...'}</span>
+            {!isUserDrawing && (
+              <button
+                onClick={() => setHintVisible((v) => !v)}
+                style={{
+                  padding: '0.3rem 0.7rem',
+                  background: hintVisible ? '#e3f2fd' : '#fff',
+                  border: '1px solid #2196f3',
+                  borderRadius: '6px',
+                  color: '#2196f3',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  fontWeight: 'bold',
+                }}
+              >
+                💡 提示
+              </button>
+            )}
           </div>
 
           {/* 画布区域 */}
@@ -432,6 +462,24 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
                 </div>
               )}
 
+              {/* 提示 toast：字数 + 首字 */}
+              {hintVisible && currentRound && (
+                <div
+                  style={{
+                    textAlign: 'center',
+                    marginBottom: '0.75rem',
+                    padding: '0.5rem',
+                    background: '#fff3e0',
+                    borderRadius: '8px',
+                    border: '1px solid #ff9800',
+                    color: '#e65100',
+                    fontSize: '0.9rem',
+                  }}
+                >
+                  💡 提示：{currentRound.targetWord.length} 字词，第 1 个字是「{currentRound.targetWord[0]}」
+                </div>
+              )}
+
               {/* AI 画作画布（只读，加载笔画后逐笔动画绘制） */}
               <Canvas ref={localCanvasRef} toolState={toolState} onToolChange={setToolState} readOnly />
 
@@ -449,6 +497,27 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
                 </p>
               )}
 
+              {/* 历史猜测 */}
+              {currentRound?.userGuesses && currentRound.userGuesses.length > 0 && (
+                <div style={{ marginTop: '0.75rem', display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                  {currentRound.userGuesses.slice(-3).map((g, i) => (
+                    <span
+                      key={i}
+                      style={{
+                        padding: '0.3rem 0.8rem',
+                        background: '#fff3e0',
+                        borderRadius: '16px',
+                        fontSize: '0.85rem',
+                        color: '#e65100',
+                        border: '1px solid #ffb74d',
+                      }}
+                    >
+                      {g} ✕
+                    </span>
+                  ))}
+                </div>
+              )}
+
               {/* 猜词输入（笔画绘制完成后 status=guessing 才可猜） */}
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem', justifyContent: 'center' }}>
                 <input
@@ -458,7 +527,7 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
                   onKeyDown={(e) => {
                     if (e.key === 'Enter') submitGuess(state.guessText);
                   }}
-                  placeholder={state.game?.status === 'guessing' ? '输入你的猜测...' : '等 AI 画完再猜...'}
+                  placeholder={state.game?.status === 'guessing' ? `输入猜测（剩余 ${guessesRemaining} 次）...` : '等 AI 画完再猜...'}
                   disabled={state.game?.status !== 'guessing'}
                   style={{
                     padding: '0.6rem 1rem',
@@ -486,6 +555,14 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
                 </button>
               </div>
 
+              {/* 剩余次数 */}
+              {state.game?.status === 'guessing' && (
+                <div style={{ textAlign: 'center', marginTop: '0.4rem', fontSize: '0.8rem', color: '#999' }}>
+                  剩余 {guessesRemaining}/{maxGuesses} 次猜测机会
+                </div>
+              )}
+
+              {/* 反馈 */}
               {state.guessFeedback && (
                 <div
                   style={{
@@ -528,6 +605,48 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
           )}
         </div>
       </div>
+
+      {/* 正确闪烁动画 */}
+      {flashCorrect && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(76,175,80,0.25)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            animation: 'flashFade 0.6s ease-out forwards',
+          }}
+        >
+          <div style={{ fontSize: '3rem', fontWeight: 'bold', color: '#fff', textShadow: '0 2px 8px rgba(0,0,0,0.3)' }}>
+            ✅ 正确！
+          </div>
+          <style>{`@keyframes flashFade { 0%{opacity:1} 100%{opacity:0} }`}</style>
+        </div>
+      )}
+
+      {/* 轮次过渡动画 */}
+      {roundTransition && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 9999,
+            animation: 'transFade 0.8s ease-out forwards',
+          }}
+        >
+          <div style={{ fontSize: '2rem', fontWeight: 'bold', color: '#fff' }}>
+            下一轮 ➡️
+          </div>
+          <style>{`@keyframes transFade { 0%{opacity:0} 30%{opacity:1} 100%{opacity:0} }`}</style>
+        </div>
+      )}
     </div>
   );
 };

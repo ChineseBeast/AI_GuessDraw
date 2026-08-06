@@ -4,6 +4,9 @@ export type GameMode = 'single' | 'multiplayer' | 'story';
 /** 难度级别 */
 export type Difficulty = 'easy' | 'medium' | 'hard';
 
+/** AI 服务提供方（单机模式可选模型） */
+export type Provider = 'qwen' | 'minimax';
+
 /** 房间状态 */
 export type RoomStatus = 'waiting' | 'playing';
 

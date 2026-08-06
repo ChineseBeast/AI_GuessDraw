@@ -14,6 +14,7 @@ class RecognizeRequest(BaseModel):
     image: str  # Base64 PNG（含 data:image/png;base64, 前缀）
     targetWord: str
     difficulty: str  # 'easy' | 'medium' | 'hard'
+    provider: str = "qwen"  # 'qwen'（OpenAI 兼容）| 'minimax'（Anthropic 协议）
 
 
 class RecognizeResponse(BaseModel):
@@ -45,6 +46,7 @@ class DrawRequest(BaseModel):
 
     targetWord: str
     difficulty: str  # 'easy' | 'medium' | 'hard'
+    provider: str = "qwen"  # 'qwen'（OpenAI 兼容）| 'minimax'（Anthropic 协议）
 
 
 class DrawResponse(BaseModel):

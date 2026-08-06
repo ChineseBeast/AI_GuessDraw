@@ -150,12 +150,18 @@ export const Canvas = forwardRef<CanvasRef, CanvasProps>(function Canvas(
   const containerRef = useRef<HTMLDivElement>(null);
   useKeyboardShortcuts({ containerRef, undo, redo, enabled: !readOnly });
 
+  // 边框+圆角放在容器上（而非 canvas），保证圆角处黑边完整不残缺
   const containerStyle: React.CSSProperties = {
     position: 'relative',
     width: '100%',
+    maxWidth: 560,
+    margin: '0 auto',
     aspectRatio: `${width} / ${height}`,
     overflow: 'hidden',
     outline: 'none',
+    borderRadius: '8px',
+    border: '2px solid #333',
+    background: '#FFFFFF',
   };
 
   const canvasStyle: React.CSSProperties = {
@@ -163,9 +169,6 @@ export const Canvas = forwardRef<CanvasRef, CanvasProps>(function Canvas(
     height: '100%',
     display: 'block',
     cursor: readOnly ? 'default' : toolState.activeTool === 'eraser' ? 'cell' : 'crosshair',
-    borderRadius: '8px',
-    border: '2px solid #333',
-    background: '#FFFFFF',
     touchAction: 'none', // 阻止移动端默认滚动/缩放行为
   };
 

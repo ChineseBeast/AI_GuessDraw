@@ -1,4 +1,4 @@
-import type { GameMode, Difficulty } from '../types/game.js';
+import type { GameMode, Difficulty, Provider } from '../types/game.js';
 
 /** 游戏模式列表 */
 export const GAME_MODES: { mode: GameMode; label: string; description: string }[] = [
@@ -27,6 +27,12 @@ export const DIFFICULTY_LEVELS: { level: Difficulty; label: string; description:
   { level: 'easy', label: '简单', description: '常见词汇，AI 识别宽松' },
   { level: 'medium', label: '中等', description: '一般词汇，AI 识别正常' },
   { level: 'hard', label: '困难', description: '生僻词汇，AI 识别严格' },
+];
+
+/** AI 模型选项（单机模式选择页用） */
+export const PROVIDER_LEVELS: { level: Provider; label: string; description: string }[] = [
+  { level: 'minimax', label: 'MiniMax', description: '画作更逼真，识别快（推荐）' },
+  { level: 'qwen', label: '通义千问', description: '笔画简洁，响应稳定' },
 ];
 
 /** 分数规则 */
