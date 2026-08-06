@@ -144,42 +144,45 @@ Implement                      →  编码
 
 ## 当前实现状态
 
-### 单机模式（5 轮制，两条 AI 流程均已端到端接通）
+### 单机模式（5 轮制，双 AI provider 可切换）
 
-流程：选难度 → 画布绘画 → 提交 → AI 识别猜词 → 轮换角色（`user_draws`/`ai_draws` 按轮次奇偶交替）→ 计分结算 → 5 轮决胜负。
+流程：选难度 → **选 AI 画家（MiniMax / 千问）** → 画布绘画 → 提交 → AI 识别猜词 → 轮换角色（`user_draws`/`ai_draws` 按轮次奇偶交替）→ 计分结算 → 5 轮决胜负。
 
-**我画AI猜（`user_draws`，运行时可用 ✅）**
-- `apps/ai-service/src/services/minimax_service.py` 调用 minimax-m3 Chat Completion API 识别画作（Canvas PNG 自动转 JPEG——火山方舟端点拒绝 PNG，多层容错解析 Top-3 猜测，`max_tokens=1024`）
-- server `SinglePlayerService.recognize()` 经 HTTP 转发到 ai-service（35s 超时，503 时抛 `AI_SERVICE_UNAVAILABLE`）
+> ⚠️ 仓库中 `apps/ai-service/.env` 的 API key 已清除为占位符，运行前需自行填入（见下文"运行前必配"）。
 
-**AI画我猜（`ai_draws`，代码完整但运行时频繁失败 ⚠️）**
-- `apps/ai-service/src/services/draw_service.py` 让大模型规划简笔画**笔画轨迹**（3-15 笔，`max_tokens=4096`），非文生图
-- server `SinglePlayerService.generateDrawing()` 转发到 ai-service（60s 超时）
-- Web 端 ai_draws 回合调用 `AIService.generateDrawing()`，Canvas `loadStrokes(strokes, {animate:true})` 动画回放 AI 笔画，随后用户猜词（客户端精确字符串匹配 `text.trim() === targetWord`）
-- **运行时失败原因**：minimax-m3 是推理模型（先吐 `reasoning_content`），输出大型坐标 JSON 常被 `finish_reason=length` 截断 → 解析得空 → `DrawError('无法从模型输出中解析笔画')` → 503。代码层面无任何禁用/桩/功能开关，全链路接通；失败是模型输出行为，非代码缺陷。可选修复：换更擅长结构化输出的模型、减小笔画数/点数、改用文生图模型、或加降级兜底。
+**我画AI猜（`user_draws`，代码已实现）**
+- `apps/ai-service/src/services/minimax_service.py` 按 provider 分支：`qwen` 走千问 OpenAI 兼容端点 / `minimax` 走 MiniMax Anthropic 协议端点识别画作（Canvas PNG 自动转 JPEG，多层容错解析 Top-3 猜测）
+- server `SinglePlayerService.recognize()` 经 HTTP 转发到 ai-service（105s 超时）
+
+**AI画我猜（`ai_draws`，代码已实现）**
+- `apps/ai-service/src/services/draw_service.py` **两步生成**：先按 `DRAW_PROMPT_TEMPLATE` 生成绘画提示词（提炼 3 个视觉特征），再据提示词输出笔画 JSON（`max_tokens=8192`）
+- 笔画数按难度区分（easy 5-10 / medium 8-15 / hard 12-25 笔）；模型失败/超时走 `_fallback_strokes` 兜底几何图形
+- server `SinglePlayerService.generateDrawing()` 转发到 ai-service（105s 超时）
+- Web 端 ai_draws 回合 `generateAiDrawing()` → Canvas `loadStrokes(strokes, {animate:true})` 动画回放 → 用户猜词
+- 猜词最多 3 次（`MAX_GUESSES`），猜错记录历史+字数/首字线索；猜对绿色闪烁动画，轮次切换有过渡动画
 
 ### 数据流（单机模式）
 
 ```
-Web (useSinglePlayer hook / AIService，apps/web/src/services/ai.service.ts)
+Web (useSinglePlayer hook / AIService，apps/web/src/services/ai.service.ts，body 含 provider)
   → POST /api/singleplayer/{word|recognize|generate-drawing}
   → vite dev proxy 重写 /api → /api/v1
   → POST /api/v1/singleplayer/*  (NestJS controller)
   → SinglePlayerService.recognize()/generateDrawing()  (HTTP 调用 ai-service)
   → ai-service /api/v1/ai/recognize | /api/v1/ai/generate-drawing
-  → minimax-m3 API（识别 / 笔画轨迹生成）
+  → 按 provider 调模型：qwen（OpenAI 兼容）/ minimax（Anthropic 协议）
   → 返回 AIRecognizeResponse / AIDrawResponse
 ```
 
 注意：Web 端 `AIService` 请求 `/api/singleplayer/*`，由 vite proxy 重写为 `/api/v1/singleplayer/*`（server globalPrefix 为 `/api/v1`），dev 环境下路由已匹配；生产部署需在网关配置同等重写。
 
-### 联机模式（基本完整）
+### 联机模式（代码存在，本分支未回归验证）
 
 WebSocket 房间系统：创建/加入/离开房间、画布实时同步、猜词、回合管理、断线重连。
 
-### 用户系统（V1，内存存储）
+### 用户系统（代码存在，本分支未回归验证）
 
-注册/登录（用户名+密码）、JWT 鉴权、游客模式、WebSocket 连接认证。用户数据存储在内存 Map 中，后续需迁移至数据库。
+注册/登录（用户名+密码）、JWT 鉴权、游客模式、WebSocket 连接认证。用户数据存储在内存 Map 中。来自 `dev-pqx` 遗留实现，本次会话未验证。
 
 ### 单机模式待完善（相对 spec 003）
 
@@ -311,12 +314,12 @@ AI_SERVICE_URL=http://localhost:8000
 当前状态（分支 `dev-xj`）：
 - **双 AI provider（可切换）**：单机模式入口选完难度后弹「选择 AI 画家」页，选 `qwen`（通义千问 `qwen3.7-flash`，OpenAI 兼容端点）或 `minimax`（MiniMax `MiniMax-M3`，Anthropic 协议端点）。provider 从前端 web → server → ai-service 全链路透传
 - **我画AI猜（user_draws）**：Canvas 提交 → `AIService.recognize` → server 转发 → ai-service 按 provider 调模型识别
-- **AI画我猜（ai_draws）已可用**：`draw_service` **两步生成**——先按 `DRAW_PROMPT_TEMPLATE` 让模型生成绘画提示词（提炼 3 个视觉特征），再据提示词输出笔画 JSON。千问 flash / MiniMax 都能画出可辨识简笔画；笔画数按难度区分（easy 5-10 / medium 8-15 / hard 12-25 笔）
+- **AI画我猜（ai_draws）代码已实现**：`draw_service` **两步生成**——先按 `DRAW_PROMPT_TEMPLATE` 让模型生成绘画提示词（提炼 3 个视觉特征），再据提示词输出笔画 JSON。笔画数按难度区分（easy 5-10 / medium 8-15 / hard 12-25 笔）；模型失败/超时走 `_fallback_strokes` 兜底。**需配 key 后实测效果**
 - **多次猜测**：ai_draws 回合最多猜 3 次（`MAX_GUESSES`），猜错记录到 `userGuesses`、给字数+首字线索、继续猜；猜对或用完次数结算。猜对有绿色闪烁动画
 - **画布**：Canvas 容器 2px 黑边 + 圆角 8px + maxWidth 560 居中（边框放容器避免残缺）
 - **运行配置**：`apps/ai-service/.env` 需自配 `MINIMAX_API_KEY`（千问）与 `MINIMAX_ANTHROPIC_API_KEY`（MiniMax）——**仓库里 key 已清除为占位符**；`apps/server/.env` 配 `AI_SERVICE_URL=http://localhost:8000`
 - 超时：ai-service 识别 90s / 绘画两步各 30s+60s 总超时；server 转发 105s；超时兜底简笔画保证链路不断
-- 联机模式基本完整（WebSocket 房间 + 画布同步 + 猜词）；用户系统 V1（内存存储，JWT）；故事模式未开始
+- 联机 / 用户系统 / 排行榜：**代码存在（来自 dev-pqx 遗留），本分支未回归验证**；故事模式未开始
 
 关键类型（`packages/shared/src/types/`）：
 - `Provider = 'qwen' | 'minimax'`（types/game.ts）；`PROVIDER_LEVELS`（constants/game.ts）

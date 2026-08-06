@@ -9,7 +9,7 @@
 
 ## 0. 一句话定位
 
-`AI_GuessDraw`（AI 你画我猜）—— AI 驱动的你画我猜游戏，支持单机 / 联机 / 故事三种模式。当前分支 `dev-xj` 的核心改动：**接入双 AI provider（通义千问 `qwen3.7-flash` + MiniMax `MiniMax-M3`），单机模式可切换模型；AI 画我猜改为两步生成（先绘画提示词再笔画），全链路可用**。
+`AI_GuessDraw`（AI 你画我猜）—— AI 驱动的你画我猜游戏，支持单机 / 联机 / 故事三种模式。当前分支 `dev-xj` 的核心改动：**接入双 AI provider（通义千问 `qwen3.7-flash` + MiniMax `MiniMax-M3`），单机模式可切换模型；AI 画我猜改为两步生成（先绘画提示词再笔画）。代码均已实现，但仓库中 API key 已清除，需配置 `.env` 后方可运行**。
 
 - 仓库：`https://github.com/ChineseBeast/AI_GuessDraw.git`
 - 当前分支：`dev-xj`（tracking `origin/dev-xj`）
@@ -31,7 +31,7 @@ AI_GuessDraw/
 │   ├── shared/        # 跨端共享类型/常量/工具（composite: true，types 指向 src/index.ts）
 │   └── ui/            # 共享 Canvas 组件
 ├── specs/             # SpecKit 规范（001-005）
-├── DEV_GUIDE.md       # ⚠️ 描述 main 分支，与 dev-pqx 现状有出入
+├── DEV_GUIDE.md       # ⚠️ 描述 main 分支，与 dev-xj 现状有出入
 └── HANDOVER.md        # 本文档
 ```
 
@@ -69,41 +69,41 @@ Node ≥ 22.13.0，pnpm ≥ 10.8.0。
 
 ## 3. 当前实现状态（基于 dev-xj 实际源码）
 
-### ✅ 单机模式（完整可玩，5 轮）
+### 单机模式（5 轮，本分支重点）
 
 流程：选难度 → **选 AI 画家（MiniMax / 千问）** → 画布绘画 → 提交 → AI 识别猜词 → 轮换角色（`user_draws`/`ai_draws` 按轮次奇偶交替）→ 计分结算 → 5 轮决胜负。
 
-**双 AI provider 全链路可切换**：单机模式入口选完难度后弹「选择 AI 画家」页（`PROVIDER_LEVELS`），选 `qwen`（通义千问 `qwen3.7-flash`，OpenAI 兼容端点）或 `minimax`（MiniMax `MiniMax-M3`，Anthropic 协议端点）。provider 从前端 `web → server → ai-service` 全链路透传（body 加 `provider` 字段）。
+**双 AI provider 可切换（代码已实现）**：单机模式入口选完难度后弹「选择 AI 画家」页（`PROVIDER_LEVELS`），选 `qwen`（通义千问 `qwen3.7-flash`，OpenAI 兼容端点）或 `minimax`（MiniMax `MiniMax-M3`，Anthropic 协议端点）。provider 从前端 `web → server → ai-service` 全链路透传（body 加 `provider` 字段）。
 
-#### 我画AI猜（`user_draws`，运行时可用 ✅）
+#### 我画AI猜（`user_draws`，代码已实现）
 - Web：Canvas 绘画 + 工具栏 → `AIService.recognize`（`POST /api/singleplayer/recognize`）
 - Server：`SinglePlayerService.recognize()` HTTP 转发到 ai-service（105s 超时）
 - ai-service：`POST /api/v1/ai/recognize` → `minimax_service.recognize_drawing(image, provider)` → 按 provider 走 OpenAI（千问）或 Anthropic（MiniMax）多模态识别
 - Canvas PNG 自动转 JPEG，三层回退解析 Top-3 猜测
 
-#### AI画我猜（`ai_draws`，运行时可用 ✅）
+#### AI画我猜（`ai_draws`，代码已实现）
 - Web：`game.tsx` 检测 ai_draws 回合 → `generateAiDrawing()` → `Canvas.loadStrokes(strokes, {animate:true})` 动画回放 → 启用猜词输入
 - Server：`SinglePlayerService.generateDrawing()` 转发到 ai-service（105s 超时）
 - ai-service：`POST /api/v1/ai/generate-drawing` → `draw_service.generate_drawing()` **两步生成**：
   1. 先按 `DRAW_PROMPT_TEMPLATE` 让模型生成绘画提示词（提炼 3 个最鲜明视觉特征 → 主体/动作/线条风格/纯白背景）
   2. 再据提示词输出笔画 JSON（`max_tokens=8192`）
 - 笔画数按难度区分（easy 5-10 / medium 8-15 / hard 12-25 笔），每笔 5-30 点、带颜色层次
-- 千问 flash / MiniMax 均能画出可辨识简笔画；模型失败/超时走 `_fallback_strokes` 兜底几何图形，链路不断
+- 模型失败/超时走 `_fallback_strokes` 兜底几何图形，链路不断（需配 key 后实测效果）
 
 #### 多次猜测交互（AI 画回合）
 - `MAX_GUESSES = 3`（`useSinglePlayer.ts`）
 - 猜错：记录到 `SinglePlayerRound.userGuesses`、显示历史猜测（最近 3 条）、给字数+首字线索（如"2 字词，第 1 个字是「月」"）、剩余次数递减、继续猜
 - 猜对：绿色闪烁动画（`flashCorrect`）→ 结算；用完 3 次 → 结算（AI 加分，显示答案）
-- 超时自动结算；轮次切换有过渡动画
+- 轮次切换有过渡动画（`roundTransition`）
 
-### ✅ 联机模式（基本完整）
+### 联机模式（代码存在，本分支未回归验证）
 WebSocket 房间系统：创建/加入/离开房间、6 位邀请码、画布实时同步、猜词（含 close/length_match/wrong 近似反馈）、60s 回合计时、回合管理、断线重连覆盖层、观战模式、画者切换、房主迁移。
 
-### ✅ 用户系统（V1，内存存储）
-注册/登录（用户名+密码，bcrypt）、JWT 鉴权、游客模式、`/auth/me`。数据存内存 Map，重启即丢。
+### 用户系统（代码存在，本分支未回归验证）
+注册/登录（用户名+密码，bcrypt）、JWT 鉴权、游客模式、`/auth/me`。数据存内存 Map，重启即丢。来自 `dev-pqx` 遗留实现，本次会话未验证。
 
-### ✅ 排行榜
-周期切换（weekly/monthly/all）、Top-3 奖牌、当前用户高亮、空状态。内存 Map 存储。
+### 排行榜（代码存在，本分支未回归验证）
+周期切换（weekly/monthly/all）、Top-3 奖牌、当前用户高亮、空状态。内存 Map 存储。来自 `dev-pqx` 遗留实现，本次会话未验证。
 
 ### ✅ Canvas 组件（packages/ui）
 自由绘画、撤销/重做（最多 50 步，Ctrl+Z / Ctrl+Y 快捷键）、导出 base64 PNG、`loadStrokes()` 动画回放、橡皮/画笔切换。**容器 2px 黑边 + 圆角 8px + maxWidth 560 居中**（边框放容器避免残缺）。
@@ -194,13 +194,13 @@ Server 侧：`apps/server/.env` 需配 `AI_SERVICE_URL=http://localhost:8000`。
 ## 7. 数据流（单机模式）
 
 ```
-Web (useSinglePlayer / AIService)
+Web (useSinglePlayer / AIService，body 含 provider)
   → POST /api/singleplayer/{recognize|generate-drawing}
   → vite proxy 重写 /api → /api/v1
   → POST /api/v1/singleplayer/*  (NestJS controller)
   → SinglePlayerService.recognize()/generateDrawing()  (HTTP 调 ai-service)
   → ai-service /api/v1/ai/{recognize|generate-drawing}
-  → 火山方舟 minimax-m3
+  → 按 provider 调模型：qwen（OpenAI 兼容）/ minimax（Anthropic 协议）
   → 返回 AIRecognizeResponse / AIDrawResponse
 ```
 
@@ -224,10 +224,10 @@ Web (useSinglePlayer / AIService)
 | # | 名称 | 状态 |
 |---|---|---|
 | 001 | Monorepo 脚手架 | 已完成 |
-| 002 | WebSocket 房间系统 | 已完成 |
-| 003 | 单机画布与 AI 对战 | 基本完成（识别/绘画已接入真实 AI，待完善猜词/计分/降级/测试） |
-| 004 | 联机画布同步 + 排行榜 | 已完成 |
-| 005 | 用户系统 | 已完成（V1 内存存储） |
+| 002 | WebSocket 房间系统 | 代码存在（dev-pqx 遗留），本分支未验证 |
+| 003 | 单机画布与 AI 对战 | 本分支重点：双 provider + 两步 AI 画 + 多次猜测已实现；计分/降级/测试待完善 |
+| 004 | 联机画布同步 + 排行榜 | 代码存在（dev-pqx 遗留），本分支未验证 |
+| 005 | 用户系统 | 代码存在（dev-pqx 遗留），本分支未验证 |
 
 ---
 
@@ -242,19 +242,18 @@ Web (useSinglePlayer / AIService)
 
 ## 11. 与 DEV_GUIDE 的差异（以本文档为准）
 
-`DEV_GUIDE.md` 描述 `main` 分支，`dev-pqx` 与之差异：
+`DEV_GUIDE.md` 描述 `main` 分支，`dev-xj` 与之差异：
 
-| 项 | DEV_GUIDE（main） | dev-pqx 实际 |
+| 项 | DEV_GUIDE（main） | dev-xj 实际 |
 |---|---|---|
-| 单机 AI provider | mock（随机/成功率） | 真实火山方舟 minimax-m3 |
-| ai-service | 仅 `/health`、`/info` 桩 | 完整 recognize + generate-drawing |
-| server singleplayer | mock recognize | HTTP 转发 ai-service |
-| AI画我猜流程 | 文档称"未实现" | 代码已端到端接通（运行时失败是模型输出问题） |
+| 单机 AI provider | mock（随机/成功率） | 双 provider：qwen（千问 flash）/ minimax（MiniMax-M3），可切换 |
+| 模型选择 | 无 | 单机入口「选择 AI 画家」页（`PROVIDER_LEVELS`） |
+| ai-service | 仅 `/health`、`/info` 桩 | 完整 recognize + generate-drawing（按 provider 分支） |
+| AI画我猜流程 | 文档称"未实现" | 两步生成（绘画提示词 → 笔画），代码已实现 |
+| 猜词交互 | 猜一次即结算 | 最多 3 次（`MAX_GUESSES`），记录历史+线索 |
 | 计分 | spec 的 10 分制 | 简化为每轮 +1 `calculateRoundScore` |
-| NestJS | `import type {Provider}` | 值 `import {Provider}`（emitDecoratorMetadata） |
-| server tsconfig | CommonJS | node16 |
-| nanoid | 5.x | 3.x（Taro/CJS 兼容） |
+| API key | 无说明 | 仓库已清除，需自配 `.env` |
 
 ---
 
-**最后更新**：基于 `dev-pqx` 分支 `326be6e` 提交的源码审计。
+**最后更新**：基于 `dev-xj` 分支 `d468f3a` 提交的源码审计。
