@@ -46,7 +46,7 @@ async def recognize(req: RecognizeRequest) -> RecognizeResponse:
 
     # 调用 MiniMax 识别
     try:
-        guesses = await recognize_drawing(req.image)
+        guesses = await recognize_drawing(req.image, req.provider)
     except MiniMaxError as exc:
         raise HTTPException(
             status_code=503,
@@ -88,7 +88,7 @@ async def generate_drawing_route(req: DrawRequest) -> DrawResponse:
         )
 
     try:
-        strokes = await generate_drawing(req.targetWord, req.difficulty)
+        strokes = await generate_drawing(req.targetWord, req.difficulty, req.provider)
     except DrawError as exc:
         raise HTTPException(
             status_code=503,

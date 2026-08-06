@@ -3,11 +3,15 @@ import type {
   SinglePlayerGame,
   SinglePlayerRound,
   Difficulty,
+  Provider,
   AIRecognizeResponse,
   AIDrawStroke,
 } from '@draw-guess/shared';
 import { TOTAL_ROUNDS, ROUND_TIME } from '@draw-guess/shared';
 import { AIService } from '../services/ai.service';
+
+/** AI 画回合每轮最多猜测次数，用完即结算（AI 加分） */
+const MAX_GUESSES = 3;
 
 // ─── State ────────────────────────────────────────
 
@@ -66,6 +70,7 @@ type Action =
   | { type: 'AI_RECOGNIZE_ERROR'; error: string }
   | { type: 'SET_GUESS_TEXT'; text: string }
   | { type: 'SUBMIT_GUESS' }
+  | { type: 'GUESS_WRONG'; guess: string; feedback: string; remaining: number }
   | { type: 'GUESS_RESULT'; isCorrect: boolean; feedback: string; score: RoundScore }
   | { type: 'NEXT_ROUND'; targetWord: string; round: SinglePlayerRound }
   | { type: 'AI_DRAWING_GENERATED'; strokes: AIDrawStroke[] }
@@ -135,6 +140,22 @@ function reducer(state: SinglePlayerState, action: Action): SinglePlayerState {
 
     case 'SUBMIT_GUESS':
       return { ...state, loading: true };
+
+    case 'GUESS_WRONG': {
+      // 猜错但仍有剩余机会：记录猜测、保持 guessing、给线索式反馈
+      if (!state.game) return state;
+      const rounds = [...state.game.rounds];
+      const currentRound = { ...rounds[rounds.length - 1] };
+      currentRound.userGuesses = [...(currentRound.userGuesses ?? []), action.guess];
+      rounds[rounds.length - 1] = currentRound;
+      return {
+        ...state,
+        loading: false,
+        guessFeedback: action.feedback,
+        guessText: '',
+        game: { ...state.game, rounds },
+      };
+    }
 
     case 'GUESS_RESULT': {
       if (!state.game) return state;
@@ -228,13 +249,16 @@ function reducer(state: SinglePlayerState, action: Action): SinglePlayerState {
 
 // ─── Hook ─────────────────────────────────────────
 
-export function useSinglePlayer() {
+export function useSinglePlayer(provider: Provider) {
   const [state, dispatch] = useReducer(reducer, initialState);
   const canvasRef = useRef<{ getImageDataURL: () => string; clear: () => void; isEmpty: () => boolean } | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   // 保存最新的 state，供 useCallback 内读取，避免把 state 放进依赖数组导致回调每次重建
   const stateRef = useRef<SinglePlayerState>(initialState);
   stateRef.current = state;
+  // 保存 provider，供各处 AIService 调用使用
+  const providerRef = useRef<Provider>(provider);
+  providerRef.current = provider;
 
   // ─── Timer ─────────────────────────────────────
 
@@ -265,7 +289,7 @@ export function useSinglePlayer() {
 
       try {
         // 获取第一轮的目标词
-        const { word } = await AIService.getWord(difficulty);
+        const { word } = await AIService.getWord(difficulty, [], providerRef.current);
 
         const game: SinglePlayerGame = {
           id: `sp_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -318,7 +342,7 @@ export function useSinglePlayer() {
     const currentRound = game.rounds[game.rounds.length - 1];
 
     try {
-      const result = await AIService.recognize(imageDataUrl, currentRound.targetWord, game.difficulty);
+      const result = await AIService.recognize(imageDataUrl, currentRound.targetWord, game.difficulty, providerRef.current);
       // 用户画 AI 猜：result.isCorrect 表示 AI 是否猜对
       const score = calculateRoundScore(result.isCorrect, 'user_draws');
 
@@ -336,25 +360,41 @@ export function useSinglePlayer() {
       const game = stateRef.current.game;
       if (!game || game.status !== 'guessing') return;
 
+      const currentRound = game.rounds[game.rounds.length - 1];
+      const guess = text.trim();
+      if (!guess) return;
+
       dispatch({ type: 'SUBMIT_GUESS' });
 
-      const currentRound = game.rounds[game.rounds.length - 1];
-      const isCorrect = text.trim() === currentRound.targetWord;
+      const isCorrect = guess === currentRound.targetWord;
+      const guessesSoFar = (currentRound.userGuesses ?? []).length;
 
-      let feedback: string;
       if (isCorrect) {
-        feedback = '🎉 恭喜！你猜对了！';
-      } else if (text.trim().length === currentRound.targetWord.length) {
-        feedback = '📏 字数对了，但内容不对';
-      } else {
-        feedback = '❌ 不对，再试试！';
+        // 猜对：动画后结算（调用方处理动画延迟）
+        stopTimer();
+        const score = calculateRoundScore(true, 'ai_draws');
+        dispatch({ type: 'GUESS_RESULT', isCorrect: true, feedback: '🎉 恭喜！你猜对了！', score });
+        return;
       }
 
-      stopTimer();
-      // AI 画 用户猜：isCorrect 表示用户是否猜对
-      const score = calculateRoundScore(isCorrect, 'ai_draws');
-
-      dispatch({ type: 'GUESS_RESULT', isCorrect, feedback, score });
+      // 猜错：线索式反馈，根据剩余次数决定继续猜 or 结算
+      const remaining = MAX_GUESSES - guessesSoFar - 1; // 本次用掉一次后的剩余
+      const lenOk = guess.length === currentRound.targetWord.length;
+      let feedback: string;
+      if (remaining > 0) {
+        // 还有机会：给字数 + 首字线索
+        const firstChar = currentRound.targetWord[0];
+        feedback = lenOk
+          ? `📏 字数对了，再想想（剩余 ${remaining} 次）`
+          : `再想想：${currentRound.targetWord.length} 字词，第 1 个字是「${firstChar}」（剩余 ${remaining} 次）`;
+        dispatch({ type: 'GUESS_WRONG', guess, feedback, remaining });
+      } else {
+        // 用完机会：结算（AI 加分）
+        stopTimer();
+        const score = calculateRoundScore(false, 'ai_draws');
+        const hint = `答案是「${currentRound.targetWord}」`;
+        dispatch({ type: 'GUESS_RESULT', isCorrect: false, feedback: `😢 ${lenOk ? '字数对了但没猜对' : '没猜对'}，${hint}`, score });
+      }
     },
     [stopTimer]
   );
@@ -373,7 +413,7 @@ export function useSinglePlayer() {
     const role = nextRoundNumber % 2 === 1 ? 'user_draws' : 'ai_draws';
 
     try {
-      const { word } = await AIService.getWord(game.difficulty, usedWords);
+      const { word } = await AIService.getWord(game.difficulty, usedWords, providerRef.current);
 
       const newRound: SinglePlayerRound = {
         roundNumber: nextRoundNumber,
@@ -416,7 +456,7 @@ export function useSinglePlayer() {
     if (currentRound.role !== 'ai_draws') return [];
 
     try {
-      const result = await AIService.generateDrawing(currentRound.targetWord, game.difficulty);
+      const result = await AIService.generateDrawing(currentRound.targetWord, game.difficulty, providerRef.current);
       dispatch({ type: 'AI_DRAWING_GENERATED', strokes: result.strokes });
       startTimer();
       return result.strokes;
@@ -434,6 +474,10 @@ export function useSinglePlayer() {
   const currentRound = state.game?.rounds[state.game.rounds.length - 1] ?? null;
   const isUserDrawing = currentRound?.role === 'user_draws';
   const isGameOver = state.game?.status === 'game_end';
+  // AI 画回合剩余猜测次数
+  const guessesRemaining = currentRound
+    ? MAX_GUESSES - (currentRound.userGuesses ?? []).length
+    : MAX_GUESSES;
 
   return {
     state,
@@ -441,6 +485,8 @@ export function useSinglePlayer() {
     currentRound,
     isUserDrawing,
     isGameOver,
+    maxGuesses: MAX_GUESSES,
+    guessesRemaining,
     startGame,
     submitDrawing,
     submitGuess,
