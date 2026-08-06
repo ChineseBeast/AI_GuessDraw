@@ -293,9 +293,9 @@ AI_SERVICE_URL=http://localhost:8000
 # 任务上下文
 
 我在开发一个 AI 驱动的你画我猜游戏项目（AI_GuessDraw），Monorepo 结构（Turborepo + pnpm workspace），包含 6 个包：
-- apps/web — React 18 + Vite 前端
+- apps/web — React 18 + Vite 前端（useState 手动路由）
 - apps/server — NestJS 10 后端（REST API `/api/v1` 前缀 + WebSocket 网关，端口 3000）
-- apps/ai-service — FastAPI (Python) AI 服务（端口 8000，识别/绘画已接入 minimax-m3）
+- apps/ai-service — FastAPI (Python) AI 服务（端口 8000，识别/绘画）
 - apps/miniprogram — Taro 4 小程序（仅脚手架）
 - packages/shared — 共享类型/常量/工具（TypeScript composite 项目）
 - packages/ui — 共享 Canvas 组件
@@ -308,31 +308,32 @@ AI_SERVICE_URL=http://localhost:8000
 - 开发流程：Spec-First（specs/ 目录），禁止跳过规范直接编码
 - packages/shared 的 types 指向源码 src/index.ts，消费方 tsconfig 不要加 references
 
-当前状态：
-- 单机模式两条 AI 流程均已端到端接通：我画AI猜（user_draws，运行时可用）经 minimax-m3 识别；AI画我猜（ai_draws）经 minimax-m3 生成笔画轨迹 + 前端 Canvas 动画回放，但运行时因模型输出大型坐标 JSON 常被 finish_reason=length 截断而频繁失败（代码无禁用开关）
-- AI provider 为字节火山方舟（Volcano Ark）的 minimax-m3，代码沿用 MINIMAX_* 命名；运行前需配 apps/ai-service/.env（MINIMAX_API_KEY 等）与 apps/server/.env（AI_SERVICE_URL）
-- 联机模式基本完整（WebSocket 房间 + 画布同步 + 猜词）
-- 用户系统 V1（内存存储，JWT 鉴权）
-- 单机模式待完善：猜词交互/超时、计分规则（1 分制 vs spec 10 分制）、AI 服务降级重试、未完成测试
-- 故事模式未开始，小程序仅脚手架
+当前状态（分支 `dev-xj`）：
+- **双 AI provider（可切换）**：单机模式入口选完难度后弹「选择 AI 画家」页，选 `qwen`（通义千问 `qwen3.7-flash`，OpenAI 兼容端点）或 `minimax`（MiniMax `MiniMax-M3`，Anthropic 协议端点）。provider 从前端 web → server → ai-service 全链路透传
+- **我画AI猜（user_draws）**：Canvas 提交 → `AIService.recognize` → server 转发 → ai-service 按 provider 调模型识别
+- **AI画我猜（ai_draws）已可用**：`draw_service` **两步生成**——先按 `DRAW_PROMPT_TEMPLATE` 让模型生成绘画提示词（提炼 3 个视觉特征），再据提示词输出笔画 JSON。千问 flash / MiniMax 都能画出可辨识简笔画；笔画数按难度区分（easy 5-10 / medium 8-15 / hard 12-25 笔）
+- **多次猜测**：ai_draws 回合最多猜 3 次（`MAX_GUESSES`），猜错记录到 `userGuesses`、给字数+首字线索、继续猜；猜对或用完次数结算。猜对有绿色闪烁动画
+- **画布**：Canvas 容器 2px 黑边 + 圆角 8px + maxWidth 560 居中（边框放容器避免残缺）
+- **运行配置**：`apps/ai-service/.env` 需自配 `MINIMAX_API_KEY`（千问）与 `MINIMAX_ANTHROPIC_API_KEY`（MiniMax）——**仓库里 key 已清除为占位符**；`apps/server/.env` 配 `AI_SERVICE_URL=http://localhost:8000`
+- 超时：ai-service 识别 90s / 绘画两步各 30s+60s 总超时；server 转发 105s；超时兜底简笔画保证链路不断
+- 联机模式基本完整（WebSocket 房间 + 画布同步 + 猜词）；用户系统 V1（内存存储，JWT）；故事模式未开始
 
-关键类型：
-- AIRecognizeRequest: { image: string (base64 PNG), targetWord: string, difficulty: 'easy'|'medium'|'hard' }
-- AIRecognizeResponse: { guesses: {word, confidence}[], isCorrect: boolean, matchedGuess?: {word, confidence}, processingTime: number }
-- AIDrawRequest: { targetWord: string, difficulty: 'easy'|'medium'|'hard' }
-- AIDrawResponse: { strokes: {points: {x,y}[], color, width}[], processingTime: number }
-- 共享包索引：packages/shared/src/index.ts
+关键类型（`packages/shared/src/types/`）：
+- `Provider = 'qwen' | 'minimax'`（types/game.ts）；`PROVIDER_LEVELS`（constants/game.ts）
+- AIRecognizeRequest: { image, targetWord, difficulty, provider }
+- AIRecognizeResponse: { guesses: {word, confidence}[], isCorrect, matchedGuess?, processingTime }
+- AIDrawRequest: { targetWord, difficulty, provider }
+- AIDrawResponse: { strokes: {points: {x,y}[], color, width}[], processingTime }
+- `SinglePlayerRound.userGuesses?: string[]`（AI画猜历史）
 
 ## 本次任务
 
-ai画我猜 + 完善单机模式。具体要求：
+（按当次需求填写，示例）完善单机模式。可参考方向：
 
-1. **AI 画我猜回合**：核对并完善 ai_draws 全链路（ai-service `/api/v1/ai/generate-drawing` 生成笔画轨迹 → server 转发 → Web `AIService.generateDrawing()` → Canvas `loadStrokes()` 动画回放 → 用户猜词）
-2. **猜词交互**：猜错后允许继续猜（spec 003 US2 验收 5），并处理 ai_draws 回合猜词倒计时归零的自动结算（当前会停在 guessing 状态）
-3. **计分对齐 spec**：将 Web 端 1 分制改为 spec US5 的 10 分制（基础分 10 + 时间奖励 floor(剩余秒×0.1, 最大 5) + 置信度奖励最大 5），与 server `calculateScore` 对齐
-4. **AI 服务降级**：spec SP-015 要求识别超时/不可用时提供重试按钮 + 30% 随机匹配降级
-5. **补全未完成任务**：Toolbar/Timer/快捷键/响应式测试（T027/T041/T052）、页面过渡动画（T055）、全量测试通过（T059）、quickstart 验证（T060）
-6. 保持现有类型契约不变，不改 packages/shared 中的类型定义
+1. **计分对齐 spec**：Web 端当前每轮 +1 简化计分，spec US5 要求 10 分制（基础分 10 + 时间奖励 + 置信度奖励），server 已有 `calculateScore` 未被使用
+2. **猜词超时**：ai_draws 回合倒计时归零后自动结算（当前停在 guessing）
+3. **词库类别**：`words.json` 无类别（名词/动词），提示按钮目前只显示字数+首字；如需语义提示需扩展词库
+4. **补全测试**：Toolbar/Timer/快捷键/响应式测试、页面过渡动画、全量测试、quickstart
 
 请先阅读相关文件了解现有实现，然后给出修改方案。
 ```
