@@ -4,7 +4,16 @@ import { AuthService } from '../services/auth.service';
 interface User {
   id: string;
   username: string;
+  email?: string;
+  avatar?: string;
   createdAt: string;
+  updatedAt: string;
+  stats?: {
+    gamesPlayed: number;
+    gamesWon: number;
+    totalScore: number;
+    currentStreak: number;
+  };
 }
 
 export function useAuth() {
@@ -39,11 +48,11 @@ export function useAuth() {
     }
   }, []);
 
-  const register = useCallback(async (username: string, password: string) => {
+  const register = useCallback(async (username: string, password: string, email?: string) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await AuthService.register(username, password);
+      const result = await AuthService.register(username, password, email);
       setUser(result.user);
     } catch (err) {
       setError(err instanceof Error ? err.message : '注册失败');
@@ -58,6 +67,53 @@ export function useAuth() {
     setUser(null);
   }, []);
 
+  const updateProfile = useCallback(async (updates: { username?: string; email?: string; avatar?: string }) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const updatedUser = await AuthService.updateProfile(updates);
+      setUser(updatedUser);
+      return updatedUser;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '更新失败');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      await AuthService.changePassword(currentPassword, newPassword);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '修改密码失败');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const deleteAccount = useCallback(async (password: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      await AuthService.deleteAccount(password);
+      setUser(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '注销账号失败');
+      throw err;
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    const u = await AuthService.getMe();
+    setUser(u);
+  }, []);
+
   return {
     user,
     isAuthenticated: !!user,
@@ -66,6 +122,10 @@ export function useAuth() {
     login,
     register,
     logout,
+    updateProfile,
+    changePassword,
+    deleteAccount,
+    refreshUser,
     clearError: () => setError(null),
   };
 }

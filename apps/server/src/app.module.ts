@@ -6,11 +6,11 @@ import { WordService } from './services/word.service';
 import { SinglePlayerModule } from './modules/singleplayer/singleplayer.module';
 import { LeaderboardModule } from './modules/leaderboard/leaderboard.module';
 import { AuthModule } from './modules/auth/auth.module';
-import { WsAuthGuard } from './gateway/ws-auth.guard';
 
 @Module({
   imports: [SinglePlayerModule, LeaderboardModule, AuthModule],
   controllers: [],
-  providers: [RoomGateway, RoomManagerService, GameEngineService, WordService, WsAuthGuard],
+  providers: [RoomGateway, RoomManagerService, GameEngineService, WordService],
+  exports: [RoomManagerService, GameEngineService, WordService],
 })
 export class AppModule {}

@@ -5,9 +5,19 @@ import { MultiplayerLobby } from './pages/multiplayer/lobby';
 import { MultiplayerGame } from './pages/multiplayer/game';
 import { LeaderboardPage } from './pages/leaderboard';
 import { LoginPage, RegisterPage } from './pages/auth';
+import { ProfilePage, SettingsPage } from './pages/user';
 import { useAuth } from './hooks/useAuth';
 
-type Page = 'home' | 'login' | 'register' | 'singleplayer' | 'multiplayer-lobby' | 'multiplayer-game' | 'leaderboard';
+type Page =
+  | 'home'
+  | 'login'
+  | 'register'
+  | 'profile'
+  | 'settings'
+  | 'singleplayer'
+  | 'multiplayer-lobby'
+  | 'multiplayer-game'
+  | 'leaderboard';
 
 const App: React.FC = () => {
   const [page, setPage] = useState<Page>('home');
@@ -33,6 +43,11 @@ const App: React.FC = () => {
 
   const handleBackToLobby = () => setPage('multiplayer-lobby');
 
+  const handleLogout = () => {
+    logout();
+    setPage('home');
+  };
+
   // ─── 首页 ────────────────────────────────────
   if (page === 'home') {
     return (
@@ -44,11 +59,28 @@ const App: React.FC = () => {
         }}>
           {isAuthenticated ? (
             <>
-              <span style={{ color: '#666', fontSize: '0.9rem' }}>
-                👤 {user?.username}
-              </span>
               <button
-                onClick={logout}
+                onClick={() => setPage('profile')}
+                style={{
+                  padding: '0.3rem 0.8rem', fontSize: '0.9rem',
+                  background: '#667eea', color: 'white',
+                  border: 'none', borderRadius: '4px', cursor: 'pointer',
+                }}
+              >
+                👤 {user?.username}
+              </button>
+              <button
+                onClick={() => setPage('settings')}
+                style={{
+                  padding: '0.3rem 0.8rem', fontSize: '0.9rem',
+                  background: 'transparent', border: '1px solid #ddd',
+                  borderRadius: '4px', cursor: 'pointer', color: '#666',
+                }}
+              >
+                ⚙️ 设置
+              </button>
+              <button
+                onClick={handleLogout}
                 style={{
                   padding: '0.3rem 0.8rem', fontSize: '0.85rem',
                   background: 'transparent', border: '1px solid #ddd',
@@ -131,6 +163,26 @@ const App: React.FC = () => {
       <RegisterPage
         onRegisterSuccess={handleNavigateHome}
         onNavigateToLogin={() => setPage('login')}
+      />
+    );
+  }
+
+  // ─── 用户资料页 ──────────────────────────────
+  if (page === 'profile') {
+    return (
+      <ProfilePage
+        onNavigateHome={handleNavigateHome}
+        onNavigateSettings={() => setPage('settings')}
+      />
+    );
+  }
+
+  // ─── 设置页 ──────────────────────────────────
+  if (page === 'settings') {
+    return (
+      <SettingsPage
+        onNavigateHome={handleNavigateHome}
+        onNavigateProfile={() => setPage('profile')}
       />
     );
   }

@@ -2,11 +2,11 @@
 
 ## 项目概览
 
-**你画我猜 AI（Draw & Guess AI）** — AI 驱动的你画我猜游戏，支持单机、联机、故事三种模式。当前版本 v0.3.0。
+**你画我猜 AI（Draw & Guess AI）** — AI 驱动的你画我猜游戏，支持单机、联机、故事三种模式。当前版本 v0.4.0。
 
-仓库：`github.com:ChineseBeast/AI_GuessDraw.git`。当前开发分支 `dev-pqx`（领先 `main` 一个提交 `326be6e`，核心改动为用真实"公司 API"替换单机 mock AI）；`main` 为稳定分支。
+仓库：`github.com:ChineseBeast/AI_GuessDraw.git`。当前开发分支 `dev-xj`（双 AI provider + 用户管理模块）；`main` 为稳定分支。
 
-> ⚠️ 本文档已按 `dev-pqx` 实际源码校对。更详细的审计结论与已知问题清单见 [`HANDOVER.md`](./HANDOVER.md)（两者一致，以 HANDOVER 为权威）。
+> ⚠️ 本文档已按 `dev-xj` 实际源码校对。更详细的审计结论与已知问题清单见 [`HANDOVER.md`](./HANDOVER.md)（两者一致，以 HANDOVER 为权威）。
 
 ---
 
@@ -34,13 +34,13 @@ AI_GuessDraw/
 
 ### 各包技术栈与端口
 
-| 包 | 技术栈 | 端口 | 职责 |
-|---|---|---|---|
-| `apps/web` | React 18 + Vite 5 | 5173 | 单机/联机/排行榜/认证页面，useState 手动路由（无 react-router） |
-| `apps/server` | NestJS 10 + Socket.IO 4 | 3000 | REST API（`/api/v1` 前缀）+ WebSocket 网关，房间/游戏/认证/排行榜 |
-| `apps/ai-service` | FastAPI + Uvicorn | 8000 | AI 服务（`/api/v1/ai/recognize` 识别 + `/api/v1/ai/generate-drawing` 绘画，已接入 minimax-m3） |
-| `packages/shared` | TypeScript | — | 类型定义、常量、工具函数，`types` 字段指向 `src/index.ts` |
-| `packages/ui` | React + TypeScript | — | Canvas 组件（Canvas.tsx / Canvas.hooks.ts / Canvas.utils.ts） |
+| 包                | 技术栈                  | 端口 | 职责                                                                                           |
+| ----------------- | ----------------------- | ---- | ---------------------------------------------------------------------------------------------- |
+| `apps/web`        | React 18 + Vite 5       | 5173 | 单机/联机/排行榜/认证页面，useState 手动路由（无 react-router）                                |
+| `apps/server`     | NestJS 10 + Socket.IO 4 | 3000 | REST API（`/api/v1` 前缀）+ WebSocket 网关，房间/游戏/认证/排行榜                              |
+| `apps/ai-service` | FastAPI + Uvicorn       | 8000 | AI 服务（`/api/v1/ai/recognize` 识别 + `/api/v1/ai/generate-drawing` 绘画，已接入 minimax-m3） |
+| `packages/shared` | TypeScript              | —    | 类型定义、常量、工具函数，`types` 字段指向 `src/index.ts`                                      |
+| `packages/ui`     | React + TypeScript      | —    | Canvas 组件（Canvas.tsx / Canvas.hooks.ts / Canvas.utils.ts）                                  |
 
 ### 包间依赖关系
 
@@ -132,13 +132,13 @@ Implement                      →  编码
 
 ### 已有 Specs
 
-| # | 名称 | 状态 |
-|---|---|---|
-| 001 | Monorepo 脚手架 | 已完成 |
-| 002 | WebSocket 房间系统 | 已完成 |
-| 003 | 单机画布与 AI 对战 | 基本完成（识别/绘画已接入真实 AI，待完善猜词/计分/测试等） |
-| 004 | 联机画布同步 + 排行榜 | 已完成 |
-| 005 | 用户系统（注册/登录/JWT） | 已完成（内存存储，V1） |
+| #   | 名称                      | 状态                                                       |
+| --- | ------------------------- | ---------------------------------------------------------- |
+| 001 | Monorepo 脚手架           | 已完成                                                     |
+| 002 | WebSocket 房间系统        | 已完成                                                     |
+| 003 | 单机画布与 AI 对战        | 基本完成（识别/绘画已接入真实 AI，待完善猜词/计分/测试等） |
+| 004 | 联机画布同步 + 排行榜     | 已完成                                                     |
+| 005 | 用户系统（注册/登录/JWT） | 已完成（内存存储，V1）                                     |
 
 ---
 
@@ -151,10 +151,12 @@ Implement                      →  编码
 > ⚠️ 仓库中 `apps/ai-service/.env` 的 API key 已清除为占位符，运行前需自行填入（见下文"运行前必配"）。
 
 **我画AI猜（`user_draws`，代码已实现）**
+
 - `apps/ai-service/src/services/minimax_service.py` 按 provider 分支：`qwen` 走千问 OpenAI 兼容端点 / `minimax` 走 MiniMax Anthropic 协议端点识别画作（Canvas PNG 自动转 JPEG，多层容错解析 Top-3 猜测）
 - server `SinglePlayerService.recognize()` 经 HTTP 转发到 ai-service（105s 超时）
 
 **AI画我猜（`ai_draws`，代码已实现）**
+
 - `apps/ai-service/src/services/draw_service.py` **两步生成**：先按 `DRAW_PROMPT_TEMPLATE` 生成绘画提示词（提炼 3 个视觉特征），再据提示词输出笔画 JSON（`max_tokens=8192`）
 - 笔画数按难度区分（easy 5-10 / medium 8-15 / hard 12-25 笔）；模型失败/超时走 `_fallback_strokes` 兜底几何图形
 - server `SinglePlayerService.generateDrawing()` 转发到 ai-service（105s 超时）
@@ -178,11 +180,36 @@ Web (useSinglePlayer hook / AIService，apps/web/src/services/ai.service.ts，bo
 
 ### 联机模式（代码存在，本分支未回归验证）
 
-WebSocket 房间系统：创建/加入/离开房间、画布实时同步、猜词、回合管理、断线重连。
+WebSocket 房间系统：创建/加入/离开房间、画布实时同步、猜词、回合管理、断线重连。WebSocket 连接支持 JWT 认证（`handleConnection` 中内联验证 token，`getUserId`/`getNickname` 优先使用 JWT 验证结果，回退到 `handshake.auth` 游客模式）。
 
-### 用户系统（代码存在，本分支未回归验证）
+### 用户系统与用户管理模块（已实现并验证）
 
-注册/登录（用户名+密码）、JWT 鉴权、游客模式、WebSocket 连接认证。用户数据存储在内存 Map 中。来自 `dev-pqx` 遗留实现，本次会话未验证。
+注册/登录（用户名+密码，bcrypt 哈希）、JWT 鉴权（集中配置于 `app.config.ts`）、游客模式、WebSocket 连接认证。
+
+**用户管理 REST API（全部已端到端验证通过）**：
+
+| 方法     | 路径                                      | 认证 | 功能                                     |
+| -------- | ----------------------------------------- | ---- | ---------------------------------------- |
+| `POST`   | `/api/v1/auth/register`                   | 公开 | 注册（username + password + 可选 email） |
+| `POST`   | `/api/v1/auth/login`                      | 公开 | 登录，返回 JWT                           |
+| `GET`    | `/api/v1/auth/me`                         | JWT  | 获取当前用户资料（含 stats 统计）        |
+| `PATCH`  | `/api/v1/auth/me`                         | JWT  | 更新资料（username / email / avatar）    |
+| `POST`   | `/api/v1/auth/me/change-password`         | JWT  | 修改密码（需验证当前密码）               |
+| `DELETE` | `/api/v1/auth/me`                         | JWT  | 注销账号（需验证密码）                   |
+| `GET`    | `/api/v1/auth/profile/:id`                | 公开 | 按 ID 查询用户公开资料                   |
+| `GET`    | `/api/v1/auth/profile/username/:username` | 公开 | 按用户名查询用户公开资料                 |
+
+**UserRecord 数据结构**：`id` / `username` / `email?` / `avatar?` / `passwordHash` / `createdAt` / `updatedAt` / `stats: { gamesPlayed, gamesWon, totalScore, currentStreak }`。`PublicUserProfile` 类型排除 `passwordHash`。
+
+**前端页面**：
+
+- `ProfilePage`（`apps/web/src/pages/profile/index.tsx`）：用户资料展示与编辑、游戏统计卡片
+- `SettingsPage`（`apps/web/src/pages/settings/index.tsx`）：修改密码、退出登录、注销账号
+- 首页用户栏：已登录显示头像/设置/退出按钮，未登录显示登录/注册按钮
+
+**JWT 配置集中管理**：`apps/server/src/config/app.config.ts` 统一管理 `jwt.secret`、`jwt.expiresInSeconds`、`server.port`、`aiService.url` 等配置项，`auth.module.ts` 和 `jwt.strategy.ts` 均引用 `appConfig`，不再硬编码。
+
+用户数据仍存储在内存 Map 中（V1），重启即丢。`usernameIndex` 维护用户名→ID 的索引，支持快速查找和唯一性校验。
 
 ### 单机模式待完善（相对 spec 003）
 
@@ -211,7 +238,7 @@ interface AIGuess {
 }
 
 interface AIRecognizeRequest {
-  image: string;        // Base64 PNG（含 data:image/png;base64, 前缀）
+  image: string; // Base64 PNG（含 data:image/png;base64, 前缀）
   targetWord: string;
   difficulty: Difficulty; // 'easy' | 'medium' | 'hard'
 }
@@ -244,6 +271,45 @@ const API_ROUTES = {
 };
 ```
 
+### 用户管理类型（`packages/shared/src/types/user.ts`）
+
+```typescript
+interface UserStats {
+  gamesPlayed: number;
+  gamesWon: number;
+  totalScore: number;
+  currentStreak: number;
+}
+
+interface User {
+  id: string;
+  username: string;
+  email?: string;
+  avatar?: string;
+  createdAt: string;
+  updatedAt: string;
+  stats?: UserStats;
+}
+
+interface UpdateProfileRequest {
+  username?: string;
+  email?: string;
+  avatar?: string;
+}
+
+interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+interface AuthResponse {
+  user: User;
+  accessToken: string;
+  tokenType: 'Bearer';
+  expiresIn: number;
+}
+```
+
 ---
 
 ## AI 服务接入 minimax-m3 的要点
@@ -262,14 +328,37 @@ const API_ROUTES = {
 
 ```bash
 # apps/ai-service/.env
-MINIMAX_API_KEY=<你的火山方舟 API key>
-MINIMAX_BASE_URL=https://ark.cn-beijing.volces.com/api/coding/v3   # 默认值
-MINIMAX_MODEL=minimax-m3                                            # 默认值
+# MiniMax 官方端点（sk-api-* 格式密钥）
+MINIMAX_API_KEY=sk-api-xxxxxxx
+MINIMAX_BASE_URL=https://api.minimaxi.com/v1
+MINIMAX_MODEL=MiniMax-M3
+
+# 亦可配置为千问（火山方舟 OpenAI 兼容端点）：
+# MINIMAX_BASE_URL=https://ark.cn-beijing.volces.com/api/coding/v3
+# MINIMAX_MODEL=minimax-m3
+
+# Anthropic 兼容端点（provider=minimax 走此通道，同一密钥）
+MINIMAX_ANTHROPIC_API_KEY=sk-api-xxxxxxx
+MINIMAX_ANTHROPIC_BASE_URL=https://api.minimaxi.com/anthropic
+MINIMAX_ANTHROPIC_MODEL=MiniMax-M3
 ```
 
 ```bash
 # apps/server/.env
 AI_SERVICE_URL=http://localhost:8000
+```
+
+### Python 环境搭建（无 root 场景）
+
+ai-service 要求 Python >= 3.11，若系统版本较低（如 Ubuntu 22.04 自带 3.10），可用 **uv**（无需 root）安装：
+
+```bash
+pip3 install --user uv                    # 安装 uv
+uv python install 3.11                     # 下载独立 CPython 3.11
+cd apps/ai-service
+uv venv --python 3.11 .venv                # 创建虚拟环境
+uv pip install fastapi "uvicorn[standard]" pydantic httpx python-dotenv Pillow
+.venv/bin/python src/main.py               # 启动 ai-service
 ```
 
 ### 接入路径（已完成）
@@ -296,6 +385,7 @@ AI_SERVICE_URL=http://localhost:8000
 # 任务上下文
 
 我在开发一个 AI 驱动的你画我猜游戏项目（AI_GuessDraw），Monorepo 结构（Turborepo + pnpm workspace），包含 6 个包：
+
 - apps/web — React 18 + Vite 前端（useState 手动路由）
 - apps/server — NestJS 10 后端（REST API `/api/v1` 前缀 + WebSocket 网关，端口 3000）
 - apps/ai-service — FastAPI (Python) AI 服务（端口 8000，识别/绘画）
@@ -304,6 +394,7 @@ AI_SERVICE_URL=http://localhost:8000
 - packages/ui — 共享 Canvas 组件
 
 技术规范：
+
 - ESLint flat config，启用 consistent-type-imports（server 除外，NestJS DI 需要 emitDecoratorMetadata）
 - Prettier：单引号、分号、120 字宽、尾逗号 all
 - Commit：Conventional Commits，type 限定（feat/fix/docs/refactor 等），scope 限定（web/server/ai-service/shared 等）
@@ -312,16 +403,19 @@ AI_SERVICE_URL=http://localhost:8000
 - packages/shared 的 types 指向源码 src/index.ts，消费方 tsconfig 不要加 references
 
 当前状态（分支 `dev-xj`）：
+
 - **双 AI provider（可切换）**：单机模式入口选完难度后弹「选择 AI 画家」页，选 `qwen`（通义千问 `qwen3.7-flash`，OpenAI 兼容端点）或 `minimax`（MiniMax `MiniMax-M3`，Anthropic 协议端点）。provider 从前端 web → server → ai-service 全链路透传
 - **我画AI猜（user_draws）**：Canvas 提交 → `AIService.recognize` → server 转发 → ai-service 按 provider 调模型识别
 - **AI画我猜（ai_draws）代码已实现**：`draw_service` **两步生成**——先按 `DRAW_PROMPT_TEMPLATE` 让模型生成绘画提示词（提炼 3 个视觉特征），再据提示词输出笔画 JSON。笔画数按难度区分（easy 5-10 / medium 8-15 / hard 12-25 笔）；模型失败/超时走 `_fallback_strokes` 兜底。**需配 key 后实测效果**
 - **多次猜测**：ai_draws 回合最多猜 3 次（`MAX_GUESSES`），猜错记录到 `userGuesses`、给字数+首字线索、继续猜；猜对或用完次数结算。猜对有绿色闪烁动画
 - **画布**：Canvas 容器 2px 黑边 + 圆角 8px + maxWidth 560 居中（边框放容器避免残缺）
-- **运行配置**：`apps/ai-service/.env` 需自配 `MINIMAX_API_KEY`（千问）与 `MINIMAX_ANTHROPIC_API_KEY`（MiniMax）——**仓库里 key 已清除为占位符**；`apps/server/.env` 配 `AI_SERVICE_URL=http://localhost:8000`
+- **用户管理模块（已实现并验证）**：注册/登录/改密/改资料/注销/公开查询全链路打通；JWT 配置集中到 `app.config.ts`；WebSocket 网关内联 JWT 验证；前端 ProfilePage + SettingsPage
+- **运行配置**：`apps/ai-service/.env` 需自配 `MINIMAX_API_KEY` 与 `MINIMAX_ANTHROPIC_API_KEY`（MiniMax 官方 `sk-api-*` 密钥）；`apps/server/.env` 配 `AI_SERVICE_URL=http://localhost:8000`；Python 环境用 uv 安装 3.11（无 root 场景）
 - 超时：ai-service 识别 90s / 绘画两步各 30s+60s 总超时；server 转发 105s；超时兜底简笔画保证链路不断
-- 联机 / 用户系统 / 排行榜：**代码存在（来自 dev-pqx 遗留），本分支未回归验证**；故事模式未开始
+- 联机 / 排行榜：代码存在（来自 dev-pqx 遗留），本分支未回归验证；故事模式未开始
 
 关键类型（`packages/shared/src/types/`）：
+
 - `Provider = 'qwen' | 'minimax'`（types/game.ts）；`PROVIDER_LEVELS`（constants/game.ts）
 - AIRecognizeRequest: { image, targetWord, difficulty, provider }
 - AIRecognizeResponse: { guesses: {word, confidence}[], isCorrect, matchedGuess?, processingTime }
@@ -345,34 +439,45 @@ AI_SERVICE_URL=http://localhost:8000
 
 ## 文件速查
 
-| 功能 | 文件路径 |
-|---|---|
-| Web 入口/路由 | `apps/web/src/main.tsx` |
-| 单机模式 hook | `apps/web/src/hooks/useSinglePlayer.ts` |
-| 单机模式页面 | `apps/web/src/pages/singleplayer/index.tsx` + `game.tsx` |
-| Web AI 服务客户端 | `apps/web/src/services/ai.service.ts` |
-| Server 入口 | `apps/server/src/main.ts` |
-| Server 模块注册 | `apps/server/src/app.module.ts` |
-| 单机 controller | `apps/server/src/modules/singleplayer/singleplayer.controller.ts` |
-| 单机 service（转发 ai-service） | `apps/server/src/modules/singleplayer/singleplayer.service.ts` |
-| 单机类型 | `apps/server/src/modules/singleplayer/singleplayer.types.ts` |
-| WebSocket 网关 | `apps/server/src/gateway/room.gateway.ts` |
-| 游戏引擎 | `apps/server/src/gateway/game-engine.service.ts` |
-| 词库服务 | `apps/server/src/gateway/word.service.ts` |
-| 认证模块 | `apps/server/src/modules/auth/` |
-| 排行榜模块 | `apps/server/src/modules/leaderboard/` |
-| AI 服务入口 | `apps/ai-service/src/main.py` |
-| AI 服务路由 | `apps/ai-service/src/routers/ai.py` |
-| 识别服务（minimax-m3） | `apps/ai-service/src/services/minimax_service.py` |
-| 绘画服务（笔画生成） | `apps/ai-service/src/services/draw_service.py` |
-| AI 服务配置 | `apps/ai-service/src/config.py` |
-| AI 服务依赖 | `apps/ai-service/requirements.txt` / `pyproject.toml` |
-| 共享类型 | `packages/shared/src/types/` |
-| 共享常量 | `packages/shared/src/constants/` |
-| 共享入口 | `packages/shared/src/index.ts` |
-| Canvas 组件 | `packages/ui/src/components/Canvas/` |
-| ESLint 配置 | `eslint.config.mjs` |
-| Turbo 配置 | `turbo.json` |
-| CI 配置 | `.github/workflows/ci.yml` |
-| Commit 规范 | `commitlint.config.mjs` |
-| 项目治理文件 | `.specify/memory/constitution.md` |
+| 功能                            | 文件路径                                                          |
+| ------------------------------- | ----------------------------------------------------------------- |
+| Web 入口/路由                   | `apps/web/src/main.tsx`                                           |
+| 单机模式 hook                   | `apps/web/src/hooks/useSinglePlayer.ts`                           |
+| 单机模式页面                    | `apps/web/src/pages/singleplayer/index.tsx` + `game.tsx`          |
+| Web AI 服务客户端               | `apps/web/src/services/ai.service.ts`                             |
+| Web 认证服务                    | `apps/web/src/services/auth.service.ts`                           |
+| Web 认证 Hook                   | `apps/web/src/hooks/useAuth.ts`                                   |
+| 用户资料页                      | `apps/web/src/pages/profile/index.tsx`                            |
+| 设置页                          | `apps/web/src/pages/settings/index.tsx`                           |
+| Server 入口                     | `apps/server/src/main.ts`                                         |
+| Server 模块注册                 | `apps/server/src/app.module.ts`                                   |
+| **Server 配置中心**             | `apps/server/src/config/app.config.ts`                            |
+| 单机 controller                 | `apps/server/src/modules/singleplayer/singleplayer.controller.ts` |
+| 单机 service（转发 ai-service） | `apps/server/src/modules/singleplayer/singleplayer.service.ts`    |
+| 单机类型                        | `apps/server/src/modules/singleplayer/singleplayer.types.ts`      |
+| WebSocket 网关                  | `apps/server/src/gateway/room.gateway.ts`                         |
+| WebSocket 认证守卫（可选）      | `apps/server/src/gateway/ws-auth.guard.ts`                        |
+| 游戏引擎                        | `apps/server/src/gateway/game-engine.service.ts`                  |
+| 词库服务                        | `apps/server/src/gateway/word.service.ts`                         |
+| 认证模块                        | `apps/server/src/modules/auth/`                                   |
+| 认证类型定义                    | `apps/server/src/modules/auth/auth.types.ts`                      |
+| 认证服务                        | `apps/server/src/modules/auth/auth.service.ts`                    |
+| 认证控制器                      | `apps/server/src/modules/auth/auth.controller.ts`                 |
+| JWT 策略                        | `apps/server/src/modules/auth/strategies/jwt.strategy.ts`         |
+| 排行榜模块                      | `apps/server/src/modules/leaderboard/`                            |
+| AI 服务入口                     | `apps/ai-service/src/main.py`                                     |
+| AI 服务路由                     | `apps/ai-service/src/routers/ai.py`                               |
+| 识别服务（minimax-m3）          | `apps/ai-service/src/services/minimax_service.py`                 |
+| 绘画服务（笔画生成）            | `apps/ai-service/src/services/draw_service.py`                    |
+| AI 服务配置                     | `apps/ai-service/src/config.py`                                   |
+| AI 服务依赖                     | `apps/ai-service/requirements.txt` / `pyproject.toml`             |
+| 共享类型                        | `packages/shared/src/types/`                                      |
+| 共享用户类型                    | `packages/shared/src/types/user.ts`                               |
+| 共享常量                        | `packages/shared/src/constants/`                                  |
+| 共享入口                        | `packages/shared/src/index.ts`                                    |
+| Canvas 组件                     | `packages/ui/src/components/Canvas/`                              |
+| ESLint 配置                     | `eslint.config.mjs`                                               |
+| Turbo 配置                      | `turbo.json`                                                      |
+| CI 配置                         | `.github/workflows/ci.yml`                                        |
+| Commit 规范                     | `commitlint.config.mjs`                                           |
+| 项目治理文件                    | `.specify/memory/constitution.md`                                 |

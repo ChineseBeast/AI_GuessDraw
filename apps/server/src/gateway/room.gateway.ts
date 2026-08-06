@@ -1,19 +1,13 @@
-import type {
-  OnGatewayConnection,
-  OnGatewayDisconnect} from '@nestjs/websockets';
-import {
-  WebSocketGateway,
-  WebSocketServer,
-  SubscribeMessage,
-  ConnectedSocket,
-  MessageBody,
-} from '@nestjs/websockets';
+import type { OnGatewayConnection, OnGatewayDisconnect } from '@nestjs/websockets';
+import { WebSocketGateway, WebSocketServer, SubscribeMessage, ConnectedSocket, MessageBody } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { COUNTDOWN_DURATION, ROUND_RESULT_DURATION, MAX_RECONNECT_TIME } from '@draw-guess/shared';
 import { RoomManagerService } from '../services/room-manager.service';
 import { GameEngineService } from '../services/game-engine.service';
 import { WordService } from '../services/word.service';
+import type { JwtPayload } from '../modules/auth/auth.types';
 import type {
   CreateRoomPayload,
   JoinRoomPayload,
@@ -56,12 +50,47 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly roomManager: RoomManagerService,
     private readonly gameEngine: GameEngineService,
     private readonly wordService: WordService,
+    private readonly jwtService: JwtService,
   ) {}
 
   // ─── Lifecycle ───────────────────────────────────
 
   handleConnection(client: Socket): void {
+    // 使用 JWT 验证连接（内联 WsAuthGuard 逻辑）
+    const token = this.extractToken(client);
+    if (token) {
+      try {
+        const payload = this.jwtService.verify<JwtPayload>(token);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (client as any).userId = payload.sub;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (client as any).username = payload.username;
+        this.logger.debug(`WS authenticated: ${payload.username} (${client.id})`);
+      } catch {
+        this.logger.warn(`WS invalid token from client: ${client.id}`);
+      }
+    }
     this.logger.log(`Client connected: ${client.id}`);
+  }
+
+  /**
+   * 从客户端连接中提取 Token
+   */
+  private extractToken(client: Socket): string | undefined {
+    // 从 handshake auth 中提取
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const auth = (client.handshake as any).auth;
+    if (auth?.token) {
+      return auth.token;
+    }
+
+    // 从 query 参数中提取
+    const queryToken = client.handshake.query?.token;
+    if (typeof queryToken === 'string') {
+      return queryToken;
+    }
+
+    return undefined;
   }
 
   handleDisconnect(client: Socket): void {
@@ -96,10 +125,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // ─── Room Events ─────────────────────────────────
 
   @SubscribeMessage('create_room')
-  handleCreateRoom(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: CreateRoomPayload,
-  ): void {
+  handleCreateRoom(@ConnectedSocket() client: Socket, @MessageBody() payload: CreateRoomPayload): void {
     try {
       const userId = this.getUserId(client);
       const nickname = this.getNickname(client);
@@ -136,10 +162,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('join_room')
-  handleJoinRoom(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: JoinRoomPayload,
-  ): void {
+  handleJoinRoom(@ConnectedSocket() client: Socket, @MessageBody() payload: JoinRoomPayload): void {
     try {
       const userId = this.getUserId(client);
       const nickname = this.getNickname(client);
@@ -265,10 +288,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('canvas_action')
-  handleCanvasAction(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: CanvasActionPayload,
-  ): void {
+  handleCanvasAction(@ConnectedSocket() client: Socket, @MessageBody() payload: CanvasActionPayload): void {
     const mapping = this.socketToUser.get(client.id);
     if (!mapping) return;
 
@@ -308,10 +328,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('submit_guess')
-  handleSubmitGuess(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: SubmitGuessPayload,
-  ): void {
+  handleSubmitGuess(@ConnectedSocket() client: Socket, @MessageBody() payload: SubmitGuessPayload): void {
     const mapping = this.socketToUser.get(client.id);
     if (!mapping) return;
 
@@ -326,10 +343,14 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (round.drawerId === userId) return;
 
     // 已猜对的不重复处理
-    if (round.guesses.some(g => g.playerId === userId && g.isCorrect)) return;
+    if (round.guesses.some((g) => g.playerId === userId && g.isCorrect)) return;
 
     const { guess, guesserRank, allGuessed } = this.gameEngine.processGuess(
-      game, round, userId, payload.text, this.wordService,
+      game,
+      round,
+      userId,
+      payload.text,
+      this.wordService,
     );
 
     // 回复猜词者
@@ -348,7 +369,9 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         nickname: this.getPlayerNickname(roomId, userId),
         rank: guesserRank,
         score: guess.score,
-        guessersRemaining: game.drawerOrder.filter(id => id !== round.drawerId).length - round.guesses.filter(g => g.isCorrect).length,
+        guessersRemaining:
+          game.drawerOrder.filter((id) => id !== round.drawerId).length -
+          round.guesses.filter((g) => g.isCorrect).length,
       };
       this.server.to(roomId).emit('correct_guess', correctEvent);
     }
@@ -361,10 +384,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('reconnect')
-  handleReconnect(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: ReconnectPayload,
-  ): void {
+  handleReconnect(@ConnectedSocket() client: Socket, @MessageBody() payload: ReconnectPayload): void {
     const userId = this.getUserId(client);
 
     // 验证 session
@@ -418,10 +438,12 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
           wordHint: isDrawer ? undefined : '_'.repeat(round.targetWord.length),
           timeLimit: 60,
           scores: this.getCurrentScores(room.id),
-          correctGuessers: round.guesses.filter(g => g.isCorrect).map(g => ({
-            playerId: g.playerId,
-            nickname: this.getPlayerNickname(room.id, g.playerId),
-          })),
+          correctGuessers: round.guesses
+            .filter((g) => g.isCorrect)
+            .map((g) => ({
+              playerId: g.playerId,
+              nickname: this.getPlayerNickname(room.id, g.playerId),
+            })),
         });
 
         // 发送画布操作回放
@@ -435,10 +457,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('join_as_spectator')
-  handleJoinAsSpectator(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: JoinRoomPayload,
-  ): void {
+  handleJoinAsSpectator(@ConnectedSocket() client: Socket, @MessageBody() payload: JoinRoomPayload): void {
     try {
       const userId = this.getUserId(client);
       const nickname = this.getNickname(client);
@@ -640,11 +659,13 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const finalScores = this.gameEngine.getFinalScores(game, room);
 
-    const roundsSummary = game.rounds.map(r => ({
+    const roundsSummary = game.rounds.map((r) => ({
       roundNumber: r.roundNumber,
       targetWord: r.targetWord,
       drawer: room.players.get(r.drawerId)?.nickname || 'Unknown',
-      correctGuessers: r.guesses.filter(g => g.isCorrect).map(g => room.players.get(g.playerId)?.nickname || 'Unknown'),
+      correctGuessers: r.guesses
+        .filter((g) => g.isCorrect)
+        .map((g) => room.players.get(g.playerId)?.nickname || 'Unknown'),
     }));
 
     const event: GameEndedEvent = { finalScores, roundsSummary };
@@ -691,7 +712,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const round = game.rounds[game.currentRound - 1];
       if (round && round.drawerId === userId && round.status === 'active') {
         // 切换到下一个玩家
-        const remainingPlayers = [...room.players.keys()].filter(id => id !== userId);
+        const remainingPlayers = [...room.players.keys()].filter((id) => id !== userId);
         if (remainingPlayers.length > 0) {
           const newDrawer = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
           this.gameEngine.switchDrawer(game, round, newDrawer);
@@ -747,11 +768,20 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private getUserId(client: Socket): string {
-    // 从 Socket.IO handshake auth 中获取用户 ID
-    return (client.handshake.auth?.userId as string) || `user_${client.id.substring(0, 8)}`;
+    // 优先使用 JWT 验证后设置的 userId
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const verifiedUserId = (client as any).userId;
+    if (verifiedUserId) return verifiedUserId;
+    // 回退到 handshake.auth（游客模式）
+    return (client.handshake.auth?.userId as string) || `guest_${client.id.substring(0, 8)}`;
   }
 
   private getNickname(client: Socket): string {
+    // 优先使用 JWT 验证后设置的 username
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const verifiedUsername = (client as any).username;
+    if (verifiedUsername) return verifiedUsername;
+    // 回退到 handshake.auth（游客模式）
     return (client.handshake.auth?.nickname as string) || `Player_${client.id.substring(0, 4)}`;
   }
 
@@ -762,8 +792,13 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return player?.nickname || 'Unknown';
   }
 
-  private mapPlayers(room: { players: Map<string, { userId: string; nickname: string; avatarUrl?: string; role: string; score: number; connectionStatus: string }> }): PlayerInfo[] {
-    return [...room.players.values()].map(p => ({
+  private mapPlayers(room: {
+    players: Map<
+      string,
+      { userId: string; nickname: string; avatarUrl?: string; role: string; score: number; connectionStatus: string }
+    >;
+  }): PlayerInfo[] {
+    return [...room.players.values()].map((p) => ({
       userId: p.userId,
       nickname: p.nickname,
       avatarUrl: p.avatarUrl,
@@ -773,7 +808,14 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }));
   }
 
-  private mapSinglePlayer(p: { userId: string; nickname: string; avatarUrl?: string; role: string; score: number; connectionStatus: string }): PlayerInfo {
+  private mapSinglePlayer(p: {
+    userId: string;
+    nickname: string;
+    avatarUrl?: string;
+    role: string;
+    score: number;
+    connectionStatus: string;
+  }): PlayerInfo {
     return {
       userId: p.userId,
       nickname: p.nickname,
