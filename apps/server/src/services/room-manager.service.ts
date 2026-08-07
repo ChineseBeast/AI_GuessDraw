@@ -194,6 +194,11 @@ export class RoomManagerService {
     this.clearCleanupTimer(roomId);
   }
 
+  /** 获取所有房间（管理用） */
+  listAll(): Room[] {
+    return [...this.rooms.values()];
+  }
+
   // ─── Private Helpers ─────────────────────────────
 
   private generateRoomId(): string {

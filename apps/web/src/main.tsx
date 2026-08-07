@@ -6,6 +6,7 @@ import { MultiplayerGame } from './pages/multiplayer/game';
 import { LeaderboardPage } from './pages/leaderboard';
 import { LoginPage, RegisterPage } from './pages/auth';
 import { ProfilePage, SettingsPage } from './pages/user';
+import { AdminPage } from './pages/admin';
 import { useAuth } from './hooks/useAuth';
 
 type Page =
@@ -14,6 +15,7 @@ type Page =
   | 'register'
   | 'profile'
   | 'settings'
+  | 'admin'
   | 'singleplayer'
   | 'multiplayer-lobby'
   | 'multiplayer-game'
@@ -53,28 +55,57 @@ const App: React.FC = () => {
     return (
       <div style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
         {/* 用户信息栏 */}
-        <div style={{
-          display: 'flex', justifyContent: 'flex-end', alignItems: 'center',
-          marginBottom: '1rem', gap: '0.75rem',
-        }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-end',
+            alignItems: 'center',
+            marginBottom: '1rem',
+            gap: '0.75rem',
+          }}
+        >
           {isAuthenticated ? (
             <>
               <button
                 onClick={() => setPage('profile')}
                 style={{
-                  padding: '0.3rem 0.8rem', fontSize: '0.9rem',
-                  background: '#667eea', color: 'white',
-                  border: 'none', borderRadius: '4px', cursor: 'pointer',
+                  padding: '0.3rem 0.8rem',
+                  fontSize: '0.9rem',
+                  background: '#667eea',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
                 }}
               >
                 👤 {user?.username}
               </button>
+              {user?.role === 'admin' && (
+                <button
+                  onClick={() => setPage('admin')}
+                  style={{
+                    padding: '0.3rem 0.8rem',
+                    fontSize: '0.9rem',
+                    background: '#ff9800',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  🔧 管理后台
+                </button>
+              )}
               <button
                 onClick={() => setPage('settings')}
                 style={{
-                  padding: '0.3rem 0.8rem', fontSize: '0.9rem',
-                  background: 'transparent', border: '1px solid #ddd',
-                  borderRadius: '4px', cursor: 'pointer', color: '#666',
+                  padding: '0.3rem 0.8rem',
+                  fontSize: '0.9rem',
+                  background: 'transparent',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  color: '#666',
                 }}
               >
                 ⚙️ 设置
@@ -82,9 +113,13 @@ const App: React.FC = () => {
               <button
                 onClick={handleLogout}
                 style={{
-                  padding: '0.3rem 0.8rem', fontSize: '0.85rem',
-                  background: 'transparent', border: '1px solid #ddd',
-                  borderRadius: '4px', cursor: 'pointer', color: '#999',
+                  padding: '0.3rem 0.8rem',
+                  fontSize: '0.85rem',
+                  background: 'transparent',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  color: '#999',
                 }}
               >
                 退出
@@ -95,9 +130,13 @@ const App: React.FC = () => {
               <button
                 onClick={() => setPage('login')}
                 style={{
-                  padding: '0.4rem 1rem', fontSize: '0.9rem',
-                  background: '#2196f3', color: 'white',
-                  border: 'none', borderRadius: '6px', cursor: 'pointer',
+                  padding: '0.4rem 1rem',
+                  fontSize: '0.9rem',
+                  background: '#2196f3',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
                 }}
               >
                 登录
@@ -105,9 +144,13 @@ const App: React.FC = () => {
               <button
                 onClick={() => setPage('register')}
                 style={{
-                  padding: '0.4rem 1rem', fontSize: '0.9rem',
-                  background: '#4caf50', color: 'white',
-                  border: 'none', borderRadius: '6px', cursor: 'pointer',
+                  padding: '0.4rem 1rem',
+                  fontSize: '0.9rem',
+                  background: '#4caf50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  cursor: 'pointer',
                 }}
               >
                 注册
@@ -117,9 +160,7 @@ const App: React.FC = () => {
         </div>
 
         <h1 style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>🎨 你画我猜 AI</h1>
-        <p style={{ color: '#666', marginBottom: '2rem' }}>
-          AI 驱动的你画我猜游戏 — 支持单机、联机、故事三种模式
-        </p>
+        <p style={{ color: '#666', marginBottom: '2rem' }}>AI 驱动的你画我猜游戏 — 支持单机、联机、故事三种模式</p>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <button onClick={() => setPage('singleplayer')} style={modeButtonStyle('#667eea', '#764ba2')}>
@@ -159,32 +200,22 @@ const App: React.FC = () => {
 
   // ─── 注册页 ──────────────────────────────────
   if (page === 'register') {
-    return (
-      <RegisterPage
-        onRegisterSuccess={handleNavigateHome}
-        onNavigateToLogin={() => setPage('login')}
-      />
-    );
+    return <RegisterPage onRegisterSuccess={handleNavigateHome} onNavigateToLogin={() => setPage('login')} />;
   }
 
   // ─── 用户资料页 ──────────────────────────────
   if (page === 'profile') {
-    return (
-      <ProfilePage
-        onNavigateHome={handleNavigateHome}
-        onNavigateSettings={() => setPage('settings')}
-      />
-    );
+    return <ProfilePage onNavigateHome={handleNavigateHome} onNavigateSettings={() => setPage('settings')} />;
   }
 
   // ─── 设置页 ──────────────────────────────────
   if (page === 'settings') {
-    return (
-      <SettingsPage
-        onNavigateHome={handleNavigateHome}
-        onNavigateProfile={() => setPage('profile')}
-      />
-    );
+    return <SettingsPage onNavigateHome={handleNavigateHome} onNavigateProfile={() => setPage('profile')} />;
+  }
+
+  // ─── 后台管理 ────────────────────────────────
+  if (page === 'admin') {
+    return <AdminPage onNavigateHome={handleNavigateHome} />;
   }
 
   // ─── 单机模式 ────────────────────────────────
@@ -227,10 +258,15 @@ const App: React.FC = () => {
 
 function modeButtonStyle(color1: string, color2: string): React.CSSProperties {
   return {
-    padding: '1.5rem', fontSize: '1.2rem',
+    padding: '1.5rem',
+    fontSize: '1.2rem',
     background: `linear-gradient(135deg, ${color1} 0%, ${color2} 100%)`,
-    color: 'white', border: 'none', borderRadius: '12px', cursor: 'pointer',
-    fontWeight: 'bold', transition: 'transform 0.15s ease',
+    color: 'white',
+    border: 'none',
+    borderRadius: '12px',
+    cursor: 'pointer',
+    fontWeight: 'bold',
+    transition: 'transform 0.15s ease',
   };
 }
 

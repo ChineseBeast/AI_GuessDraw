@@ -1,8 +1,11 @@
+export type UserRole = 'user' | 'admin';
+
 export interface UserRecord {
   id: string;
   username: string;
   email?: string;
   avatar?: string;
+  role: UserRole;
   passwordHash: string;
   createdAt: Date;
   updatedAt: Date;
@@ -15,9 +18,9 @@ export interface UserRecord {
 }
 
 export interface JwtPayload {
-  sub: string;       // userId
+  sub: string; // userId
   username: string;
+  role: UserRole;
 }
 
 export type PublicUserProfile = Omit<UserRecord, 'passwordHash'>;
-

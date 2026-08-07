@@ -9,11 +9,11 @@
 
 ## 0. 一句话定位
 
-`AI_GuessDraw`（AI 你画我猜）—— AI 驱动的你画我猜游戏，支持单机 / 联机 / 故事三种模式。当前分支 `dev-xj` 的核心改动：**接入双 AI provider（通义千问 `qwen3.7-flash` + MiniMax `MiniMax-M3`），单机模式可切换模型；AI 画我猜改为两步生成（先绘画提示词再笔画）；用户管理模块完善（资料编辑/改密/注销/公开查询 + JWT 配置集中化 + WebSocket 认证修复）；AI Service 可通过 uv 在无 root 环境运行**。
+`AI_GuessDraw`（AI 你画我猜）—— AI 驱动的你画我猜游戏，支持单机 / 联机 / 故事三种模式。当前分支 `dev-xj` 的核心改动：**接入双 AI provider（通义千问 `qwen3.7-flash` + MiniMax `MiniMax-M3`），单机模式可切换模型；AI 画我猜改为两步生成（先绘画提示词再笔画）；用户管理模块完善（资料编辑/改密/注销/公开查询 + JWT 配置集中化 + WebSocket 认证修复）；后台管理模块新增（仪表盘/用户/房间/词库管理 + AdminGuard 角色鉴权）；AI Service 可通过 uv 在无 root 环境运行**。
 
 - 仓库：`https://github.com/ChineseBeast/AI_GuessDraw.git`
 - 当前分支：`dev-xj`（tracking `origin/dev-xj`）
-- 版本：v0.4.0（用户管理模块 + 环境修复）
+- 版本：v0.5.0（用户管理 + 后台管理模块 + 环境修复）
 
 ---
 
@@ -36,8 +36,8 @@ AI_GuessDraw/
 
 | 包                | 端口 | 职责                                                             |
 | ----------------- | ---- | ---------------------------------------------------------------- |
-| `apps/web`        | 5173 | 单机/联机/排行榜/认证/用户资料/设置页面                          |
-| `apps/server`     | 3000 | REST `/api/v1` + WebSocket 网关                                  |
+| `apps/web`        | 5173 | 单机/联机/排行榜/认证/用户资料/设置/后台管理页面                 |
+| `apps/server`     | 3000 | REST `/api/v1`（含 `/admin/*` 后台管理）+ WebSocket 网关         |
 | `apps/ai-service` | 8000 | `/api/v1/ai/recognize` 识别 + `/api/v1/ai/generate-drawing` 绘画 |
 
 **包间依赖**：web → shared, ui；server → shared；ui → shared；ai-service 独立（不依赖 TS 包）。
@@ -159,6 +159,48 @@ stats: { gamesPlayed, gamesWon, totalScore, currentStreak }
 
 **共享类型对齐**（`packages/shared/src/types/user.ts`）：新增 `UserStats` / `UpdateProfileRequest` / `ChangePasswordRequest` / `AuthResponse`，与后端 `UserRecord` / `PublicUserProfile` 字段一致。
 
+### 后台管理模块（已实现并端到端验证 ✅）
+
+**鉴权机制**：第一个注册用户自动成为 `admin`（`auth.service.ts` register 中 `this.users.size === 0 ? 'admin' : 'user'`），其余为 `user`。`AdminGuard` 继承 `AuthGuard('jwt')`，在 `handleRequest` 中校验 `user.role === 'admin'`，否则抛 403「需要登录」/「需要管理员权限」。所有 `/admin/*` 路由通过 `@UseGuards(AdminGuard)` + `@Controller('admin')` 统一保护。
+
+**Admin REST API（统一前缀 `/api/v1/admin`，需 admin JWT）**：
+
+| 方法     | 路径                        | 功能                                                              |
+| -------- | --------------------------- | ----------------------------------------------------------------- |
+| `GET`    | `/dashboard`                | 仪表盘统计（用户/房间/游戏/排行榜计数）                           |
+| `GET`    | `/users?limit&offset`       | 用户列表（按 createdAt 倒序分页）                                 |
+| `DELETE` | `/users/:id`                | 删除用户                                                          |
+| `POST`   | `/users/:id/reset-password` | 重置密码（body `{newPassword}` ≥6 位）                            |
+| `PATCH`  | `/users/:id/role`           | 切换角色（body `{role: 'user'\|'admin'}`）                        |
+| `GET`    | `/rooms`                    | 房间列表（含 playerCount/spectatorCount）                         |
+| `DELETE` | `/rooms/:id`                | 强制关闭房间                                                      |
+| `GET`    | `/words`                    | 词库列表（easy/medium/hard）                                      |
+| `POST`   | `/words`                    | 添加单个词汇（body `{difficulty, word}`）                         |
+| `POST`   | `/words/batch`              | 批量添加（body `{difficulty, words[]}`，返回 `{added, skipped}`） |
+| `DELETE` | `/words/:difficulty/:word`  | 删除词汇（word 需 URL 编码）                                      |
+
+**AdminService 业务方法**：依赖注入 `AuthService`（用户操作）/ `RoomManagerService`（房间操作）/ `WordService`（词库操作）/ `LeaderboardService`（统计）。`AdminModule` 通过 `imports: [AuthModule, WordModule, RoomManagerModule, LeaderboardModule]` 装配依赖。
+
+**前端实现**：
+
+- `AdminPage`（`apps/web/src/pages/admin/index.tsx`）：4 tab（📊 仪表盘 / 👥 用户管理 / 🏠 房间管理 / 📖 词库管理）
+- `AdminService`（`apps/web/src/services/admin.service.ts`）：所有 admin API 调用，自动附加 `Authorization: Bearer <token>`
+- 入口：登录后首页显示「管理后台」按钮（仅 admin 角色可见），`main.tsx` 路由 `'admin'` → `AdminPage`
+
+**UI 交互要点（修复了 prompt() 兼容问题）**：
+
+- 词库管理使用**内联输入框 + 「+ 添加」按钮**（支持回车提交），不使用 `prompt()`（沙箱浏览器/移动端不支持）
+- 用户删除/房间关闭使用**二次确认模式**（点击「删除」→ 按钮变「确认删除」+「取消」），不使用 `confirm()`
+- 密码重置使用**内联表单**（点击「重置密码」→ 出现输入框 + 「确认重置」/「取消」）
+
+**端到端验证结果**（admin/admin123 账号 + 浏览器实测）：
+
+- AdminGuard 正确拦截：无 token 返回 403「需要登录」，普通用户 token 返回 403「需要管理员权限」，admin token 返回 200
+- 仪表盘：统计数字正确（用户 2、管理员 1、今日新增 2）
+- 用户管理：列表显示、角色切换、密码重置（持久化验证：新密码登录 200，旧密码登录 401）、删除全部通过
+- 房间管理：空列表显示「暂无活跃房间」，删除 API 通过
+- 词库管理：添加（计数 30→31）、删除（计数恢复 30）、批量添加（added 4）全部通过，控制台无错误
+
 ### 排行榜（代码存在，本分支未回归验证）
 
 周期切换（weekly/monthly/all）、Top-3 奖牌、当前用户高亮、空状态。内存 Map 存储。来自 `dev-pqx` 遗留实现，本次会话未验证。
@@ -238,6 +280,8 @@ Server 侧：`apps/server/.env` 需配 `AI_SERVICE_URL=http://localhost:8000`。
 | Web 认证 Hook                   | `apps/web/src/hooks/useAuth.ts`                                                        |
 | 用户资料页                      | `apps/web/src/pages/profile/index.tsx`                                                 |
 | 设置页                          | `apps/web/src/pages/settings/index.tsx`                                                |
+| **后台管理前端页**              | `apps/web/src/pages/admin/index.tsx`                                                   |
+| **后台管理前端服务**            | `apps/web/src/services/admin.service.ts`                                               |
 | Server 入口                     | `apps/server/src/main.ts`                                                              |
 | Server 模块注册                 | `apps/server/src/app.module.ts`                                                        |
 | **Server 配置中心**             | `apps/server/src/config/app.config.ts`                                                 |
@@ -252,6 +296,11 @@ Server 侧：`apps/server/.env` 需配 `AI_SERVICE_URL=http://localhost:8000`。
 | 认证控制器                      | `apps/server/src/modules/auth/auth.controller.ts`                                      |
 | JWT 策略                        | `apps/server/src/modules/auth/strategies/jwt.strategy.ts`                              |
 | JWT Guard                       | `apps/server/src/modules/auth/guards/jwt-auth.guard.ts`                                |
+| **Admin Guard**                 | `apps/server/src/modules/auth/guards/admin.guard.ts`                                   |
+| **后台管理模块**                | `apps/server/src/modules/admin/`                                                       |
+| **后台管理控制器**              | `apps/server/src/modules/admin/admin.controller.ts`                                    |
+| **后台管理服务**                | `apps/server/src/modules/admin/admin.service.ts`                                       |
+| **后台管理类型**                | `apps/server/src/modules/admin/admin.types.ts`                                         |
 | 排行榜模块                      | `apps/server/src/modules/leaderboard/`                                                 |
 | 词库服务                        | `apps/server/src/gateway/word.service.ts`                                              |
 | AI 服务入口                     | `apps/ai-service/src/main.py`                                                          |
@@ -312,6 +361,17 @@ Client (Socket.IO) → handshake.auth.token = JWT
   → 回退到 handshake.auth（游客模式）
 ```
 
+### 后台管理
+
+```
+Web (AdminPage / AdminService，Authorization: Bearer <admin JWT>)
+  → GET/POST/DELETE/PATCH /api/admin/{dashboard|users|rooms|words}*
+  → vite proxy 重写 /api → /api/v1
+  → NestJS AdminController（@UseGuards(AdminGuard)）
+  → AdminGuard.handleRequest：校验 JWT + user.role === 'admin'，否则 403
+  → AdminService → AuthService/RoomManagerService/WordService/LeaderboardService
+```
+
 > Web 端请求 `/api/singleplayer/*`，由 vite proxy 重写为 `/api/v1/singleplayer/*`（server globalPrefix `/api/v1`）。dev 已匹配；**生产部署需在网关配同等重写**。
 
 ---
@@ -353,19 +413,20 @@ Client (Socket.IO) → handshake.auth.token = JWT
 
 `DEV_GUIDE.md` 描述 `main` 分支，`dev-xj` 与之差异：
 
-| 项                 | DEV_GUIDE（main）        | dev-xj 实际                                                                                   |
-| ------------------ | ------------------------ | --------------------------------------------------------------------------------------------- |
-| 单机 AI provider   | mock（随机/成功率）      | 双 provider：qwen（千问 flash）/ minimax（MiniMax-M3），可切换                                |
-| 模型选择           | 无                       | 单机入口「选择 AI 画家」页（`PROVIDER_LEVELS`）                                               |
-| ai-service         | 仅 `/health`、`/info` 桩 | 完整 recognize + generate-drawing（按 provider 分支）                                         |
-| AI画我猜流程       | 文档称"未实现"           | 两步生成（绘画提示词 → 笔画），代码已实现                                                     |
-| 猜词交互           | 猜一次即结算             | 最多 3 次（`MAX_GUESSES`），记录历史+线索                                                     |
-| 计分               | spec 的 10 分制          | 简化为每轮 +1 `calculateRoundScore`                                                           |
-| API key            | 无说明                   | 仓库已清除，需自配 `.env`                                                                     |
-| **用户系统**       | 仅注册/登录/JWT          | **完整用户管理**：资料编辑/改密/注销/公开查询，JWT 配置集中化（`app.config.ts`），WS 认证修复 |
-| **WebSocket 认证** | WsAuthGuard 未挂载       | 内联 JWT 验证到 `handleConnection`，`getUserId`/`getNickname` 优先 JWT                        |
-| **共享类型**       | `User` 无 stats          | 新增 `UserStats` / `UpdateProfileRequest` / `ChangePasswordRequest` / `AuthResponse`          |
-| **Python 环境**    | 需系统 Python 3.11+      | 可用 uv 无 root 安装 Python 3.11                                                              |
+| 项                 | DEV_GUIDE（main）        | dev-xj 实际                                                                                               |
+| ------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------- |
+| 单机 AI provider   | mock（随机/成功率）      | 双 provider：qwen（千问 flash）/ minimax（MiniMax-M3），可切换                                            |
+| 模型选择           | 无                       | 单机入口「选择 AI 画家」页（`PROVIDER_LEVELS`）                                                           |
+| ai-service         | 仅 `/health`、`/info` 桩 | 完整 recognize + generate-drawing（按 provider 分支）                                                     |
+| AI画我猜流程       | 文档称"未实现"           | 两步生成（绘画提示词 → 笔画），代码已实现                                                                 |
+| 猜词交互           | 猜一次即结算             | 最多 3 次（`MAX_GUESSES`），记录历史+线索                                                                 |
+| 计分               | spec 的 10 分制          | 简化为每轮 +1 `calculateRoundScore`                                                                       |
+| API key            | 无说明                   | 仓库已清除，需自配 `.env`                                                                                 |
+| **用户系统**       | 仅注册/登录/JWT          | **完整用户管理**：资料编辑/改密/注销/公开查询，JWT 配置集中化（`app.config.ts`），WS 认证修复             |
+| **后台管理**       | 无                       | **新增后台管理模块**：仪表盘/用户/房间/词库 CRUD + AdminGuard 角色鉴权，4 tab UI（内联表单，无 prompt()） |
+| **WebSocket 认证** | WsAuthGuard 未挂载       | 内联 JWT 验证到 `handleConnection`，`getUserId`/`getNickname` 优先 JWT                                    |
+| **共享类型**       | `User` 无 stats          | 新增 `UserStats` / `UpdateProfileRequest` / `ChangePasswordRequest` / `AuthResponse`                      |
+| **Python 环境**    | 需系统 Python 3.11+      | 可用 uv 无 root 安装 Python 3.11                                                                          |
 
 ---
 
@@ -408,6 +469,45 @@ Client (Socket.IO) → handshake.auth.token = JWT
 
 **端到端验证**：所有 8 个 API 端点 + Vite 代理 + 前后端联动全部通过。
 
+### 后台管理模块（Phase 1-5 + UI 修复）
+
+**后端**：
+
+- `auth.types.ts`：扩展 `UserRole = 'user' | 'admin'`，`UserRecord` 加 `role` 字段，`JwtPayload` 加 `role` claim
+- `auth.service.ts`：register 中首个用户自动 `admin`；新增 `setUserRole` / `adminResetPassword` / `adminDeleteUser` / `getAllUsers`（管理用）
+- `jwt.strategy.ts`：`validate` 返回 `{ userId, username, role }`
+
+**Admin 模块（`apps/server/src/modules/admin/`，全新增）**：
+
+- `admin.types.ts`：`DashboardStats` / `AdminUserList` / `AdminRoomList`
+- `admin.service.ts`：仪表盘统计（用户/房间/游戏/排行榜计数）、用户列表（按 createdAt 倒序分页）、房间列表、强制关闭房间、密码重置、用户删除、角色切换、词库 CRUD（add/addWords/removeWord）
+- `admin.controller.ts`：11 个 REST 端点，统一 `@UseGuards(AdminGuard)` + `@Controller('admin')`
+- `admin.module.ts`：`imports: [AuthModule, WordModule, RoomManagerModule, LeaderboardModule]`
+
+**鉴权**：
+
+- `guards/admin.guard.ts`（新建）：继承 `AuthGuard('jwt')`，`handleRequest` 校验 `user.role === 'admin'`，否则抛 403
+
+**服务层扩展**：
+
+- `services/word.service.ts`：新增 `getAllWords` / `addWord` / `addWords` / `removeWord` 管理接口
+- `services/room-manager.service.ts`：新增 `listAll()` 用于管理后台
+- 新建 `WordModule` / `RoomManagerModule` 以正确 `exports` 服务
+
+**前端**：
+
+- `pages/admin/index.tsx`（新建）：4 tab 管理页（仪表盘 / 用户 / 房间 / 词库），内联输入框（无 `prompt()`），二次确认模式（无 `confirm()`），内联密码重置表单
+- `services/admin.service.ts`（新建）：所有 admin API 调用，自动附加 Bearer token
+- `hooks/useAuth.ts`：`User` 接口加 `role` 字段
+- `services/auth.service.ts`：`AuthResponse` 加 `role` 字段
+- `main.tsx`：新增 `admin` 路由 + 主页「管理后台」入口按钮（仅 admin 可见）
+
+**端到端验证**（admin/admin123 + 浏览器实测）：
+
+- API 层：11 个端点全部通过；AdminGuard 正确拦截（无 token 403、普通用户 403、admin 200）；密码重置持久化验证（旧密码 401、新密码 200）
+- UI 层：4 tab 全部通过；词库添加/删除计数正确变化；用户删除二次确认 + 取消；密码重置内联表单工作正常；浏览器控制台无错误
+- 修复点：原 `prompt()` 在沙箱浏览器不支持，改为内联输入框 + 回车提交
+
 ---
 
-**最后更新**：基于 `dev-xj` 分支，用户管理模块实现完成 + 环境修复 + 三服务全部启动验证通过。
+**最后更新**：基于 `dev-xj` 分支，用户管理 + 后台管理模块实现完成 + 环境修复 + 三服务全部启动验证通过。

@@ -1,7 +1,7 @@
 import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
-import type { UserRecord, JwtPayload, PublicUserProfile } from './auth.types';
+import type { UserRecord, JwtPayload, PublicUserProfile, UserRole } from './auth.types';
 
 @Injectable()
 export class AuthService {
@@ -20,7 +20,11 @@ export class AuthService {
   /**
    * 用户注册
    */
-  async register(username: string, password: string, email?: string): Promise<{ user: PublicUserProfile; accessToken: string }> {
+  async register(
+    username: string,
+    password: string,
+    email?: string,
+  ): Promise<{ user: PublicUserProfile; accessToken: string }> {
     // 验证用户名
     if (!username || username.length < 2 || username.length > 20) {
       throw new ConflictException('用户名需 2-20 个字符');
@@ -45,10 +49,14 @@ export class AuthService {
     const passwordHash = await bcrypt.hash(password, 10);
     const now = new Date();
 
+    // 首个注册用户自动成为 admin
+    const role: UserRole = this.users.size === 0 ? 'admin' : 'user';
+
     const user: UserRecord = {
       id,
       username,
       email,
+      role,
       passwordHash,
       createdAt: now,
       updatedAt: now,
@@ -63,7 +71,7 @@ export class AuthService {
     this.users.set(id, user);
     this.usernameIndex.set(username, id);
 
-    const payload: JwtPayload = { sub: id, username };
+    const payload: JwtPayload = { sub: id, username, role };
     const accessToken = this.jwtService.sign(payload);
 
     return { user: this.toSafeUser(user), accessToken };
@@ -88,7 +96,7 @@ export class AuthService {
       throw new UnauthorizedException('用户名或密码错误');
     }
 
-    const payload: JwtPayload = { sub: user.id, username: user.username };
+    const payload: JwtPayload = { sub: user.id, username: user.username, role: user.role };
     const accessToken = this.jwtService.sign(payload);
 
     return { user: this.toSafeUser(user), accessToken };
@@ -135,7 +143,10 @@ export class AuthService {
   /**
    * 更新用户资料
    */
-  async updateProfile(userId: string, updates: { username?: string; email?: string; avatar?: string }): Promise<PublicUserProfile> {
+  async updateProfile(
+    userId: string,
+    updates: { username?: string; email?: string; avatar?: string },
+  ): Promise<PublicUserProfile> {
     const user = this.getFullUserById(userId);
     if (!user) {
       throw new NotFoundException('用户不存在');
@@ -230,7 +241,7 @@ export class AuthService {
    * 生成新的 JWT Token
    */
   generateToken(user: PublicUserProfile): string {
-    const payload: JwtPayload = { sub: user.id, username: user.username };
+    const payload: JwtPayload = { sub: user.id, username: user.username, role: user.role };
     return this.jwtService.sign(payload);
   }
 
@@ -247,5 +258,45 @@ export class AuthService {
    */
   getUserCount(): number {
     return this.users.size;
+  }
+
+  /**
+   * 修改用户角色（仅 admin 可调用）
+   */
+  setUserRole(userId: string, role: UserRole): PublicUserProfile {
+    const user = this.getFullUserById(userId);
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+    user.role = role;
+    user.updatedAt = new Date();
+    return this.toSafeUser(user);
+  }
+
+  /**
+   * 管理员重置用户密码
+   */
+  async adminResetPassword(userId: string, newPassword: string): Promise<void> {
+    const user = this.getFullUserById(userId);
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+    if (!newPassword || newPassword.length < 6) {
+      throw new ConflictException('新密码至少 6 位');
+    }
+    user.passwordHash = await bcrypt.hash(newPassword, 10);
+    user.updatedAt = new Date();
+  }
+
+  /**
+   * 管理员删除用户
+   */
+  adminDeleteUser(userId: string): void {
+    const user = this.getFullUserById(userId);
+    if (!user) {
+      throw new NotFoundException('用户不存在');
+    }
+    this.usernameIndex.delete(user.username);
+    this.users.delete(userId);
   }
 }

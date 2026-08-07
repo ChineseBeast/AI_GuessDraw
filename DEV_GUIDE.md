@@ -211,6 +211,40 @@ WebSocket 房间系统：创建/加入/离开房间、画布实时同步、猜�
 
 用户数据仍存储在内存 Map 中（V1），重启即丢。`usernameIndex` 维护用户名→ID 的索引，支持快速查找和唯一性校验。
 
+### 后台管理模块（已实现并端到端验证 ✅）
+
+第一个注册用户自动成为 `admin`，其余为 `user`。AdminGuard（继承 `AuthGuard('jwt')`）在 `handleRequest` 中校验 `user.role === 'admin'`，非管理员返回 403「需要管理员权限」/「需要登录」。
+
+**Admin REST API（全部已端到端验证通过，统一前缀 `/api/v1/admin`，需 admin JWT）**：
+
+| 方法     | 路径                        | 功能                                                          |
+| -------- | --------------------------- | ------------------------------------------------------------- |
+| `GET`    | `/dashboard`                | 仪表盘统计（用户/房间/游戏/排行榜计数）                       |
+| `GET`    | `/users?limit&offset`       | 用户列表（按 createdAt 倒序分页）                             |
+| `DELETE` | `/users/:id`                | 删除用户                                                      |
+| `POST`   | `/users/:id/reset-password` | 重置用户密码（body: `{newPassword}` ≥6 位）                   |
+| `PATCH`  | `/users/:id/role`           | 切换角色（body: `{role: 'user'\|'admin'}`）                   |
+| `GET`    | `/rooms`                    | 房间列表（含 playerCount/spectatorCount）                     |
+| `DELETE` | `/rooms/:id`                | 强制关闭房间                                                  |
+| `GET`    | `/words`                    | 词库列表（easy/medium/hard 三个数组）                         |
+| `POST`   | `/words`                    | 添加单个词汇（body: `{difficulty, word}`）                    |
+| `POST`   | `/words/batch`              | 批量添加（body: `{difficulty, words[]}`，返回 added/skipped） |
+| `DELETE` | `/words/:difficulty/:word`  | 删除词汇（word 需 URL 编码）                                  |
+
+**关键文件**：
+
+- 后端：`apps/server/src/modules/admin/{admin.module,admin.controller,admin.service,admin.types}.ts`
+- 鉴权：`apps/server/src/modules/auth/guards/admin.guard.ts`
+- 前端：`apps/web/src/pages/admin/index.tsx`（4 个 tab：仪表盘/用户/房间/词库）
+- 前端服务：`apps/web/src/services/admin.service.ts`
+
+**UI 交互要点**：
+
+- 词库管理使用内联输入框 + 「+ 添加」按钮（支持回车提交），**不使用 `prompt()`**（避免在沙箱浏览器/移动端失效）
+- 用户删除/房间关闭使用二次确认模式（点击「删除」→ 按钮变「确认删除」+「取消」）
+- 密码重置使用内联表单（点击「重置密码」→ 出现输入框 + 「确认重置」/「取消」）
+- AdminGuard 阻止非 admin 访问时，前端会显示错误提示
+
 ### 单机模式待完善（相对 spec 003）
 
 - 猜词交互：猜错直接进入轮次结算，spec 003 US2 要求可继续猜直至猜对/超时
@@ -464,6 +498,12 @@ uv pip install fastapi "uvicorn[standard]" pydantic httpx python-dotenv Pillow
 | 认证服务                        | `apps/server/src/modules/auth/auth.service.ts`                    |
 | 认证控制器                      | `apps/server/src/modules/auth/auth.controller.ts`                 |
 | JWT 策略                        | `apps/server/src/modules/auth/strategies/jwt.strategy.ts`         |
+| Admin Guard                     | `apps/server/src/modules/auth/guards/admin.guard.ts`              |
+| 后台管理模块                    | `apps/server/src/modules/admin/`                                  |
+| 后台管理控制器                  | `apps/server/src/modules/admin/admin.controller.ts`               |
+| 后台管理服务                    | `apps/server/src/modules/admin/admin.service.ts`                  |
+| 后台管理前端页                  | `apps/web/src/pages/admin/index.tsx`                              |
+| 后台管理前端服务                | `apps/web/src/services/admin.service.ts`                          |
 | 排行榜模块                      | `apps/server/src/modules/leaderboard/`                            |
 | AI 服务入口                     | `apps/ai-service/src/main.py`                                     |
 | AI 服务路由                     | `apps/ai-service/src/routers/ai.py`                               |

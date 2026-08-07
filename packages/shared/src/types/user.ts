@@ -1,3 +1,6 @@
+/** 用户角色 */
+export type UserRole = 'user' | 'admin';
+
 /** 用户统计数据 */
 export interface UserStats {
   gamesPlayed: number;
@@ -12,6 +15,7 @@ export interface User {
   username: string;
   email?: string;
   avatar?: string;
+  role: UserRole;
   createdAt: string;
   updatedAt: string;
   stats?: UserStats;

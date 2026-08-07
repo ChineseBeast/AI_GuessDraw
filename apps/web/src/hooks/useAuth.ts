@@ -6,6 +6,7 @@ interface User {
   username: string;
   email?: string;
   avatar?: string;
+  role: 'user' | 'admin';
   createdAt: string;
   updatedAt: string;
   stats?: {
@@ -25,12 +26,14 @@ export function useAuth() {
   useEffect(() => {
     const token = AuthService.getToken();
     if (token && !user) {
-      AuthService.getMe().then((u) => {
-        if (u) setUser(u);
-        else AuthService.clearAuth();
-      }).catch(() => {
-        AuthService.clearAuth();
-      });
+      AuthService.getMe()
+        .then((u) => {
+          if (u) setUser(u);
+          else AuthService.clearAuth();
+        })
+        .catch(() => {
+          AuthService.clearAuth();
+        });
     }
   }, []);
 

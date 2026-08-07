@@ -6,6 +6,7 @@ interface AuthResponse {
     username: string;
     email?: string;
     avatar?: string;
+    role: 'user' | 'admin';
     createdAt: string;
     updatedAt: string;
     stats?: {
