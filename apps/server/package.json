@@ -1,0 +1,43 @@
+{
+  "name": "@draw-guess/server",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "nest start --watch",
+    "build": "nest build",
+    "start": "node dist/main",
+    "lint": "eslint -c ../../eslint.config.mjs 'src/**/*.ts'",
+    "lint:fix": "eslint -c ../../eslint.config.mjs 'src/**/*.ts' --fix",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@draw-guess/shared": "workspace:*",
+    "@nestjs/common": "catalog:",
+    "@nestjs/core": "catalog:",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
+    "@nestjs/platform-express": "catalog:",
+    "@nestjs/platform-socket.io": "catalog:",
+    "@nestjs/websockets": "catalog:",
+    "bcrypt": "^6.0.0",
+    "nanoid": "catalog:",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
+    "reflect-metadata": "catalog:",
+    "rxjs": "catalog:",
+    "socket.io": "catalog:"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "catalog:",
+    "@nestjs/schematics": "catalog:",
+    "@nestjs/testing": "catalog:",
+    "@types/bcrypt": "^6.0.0",
+    "@types/jest": "^30.0.0",
+    "@types/node": "catalog:",
+    "@types/passport-jwt": "^4.0.1",
+    "jest": "^30.4.2",
+    "ts-jest": "^29.4.12",
+    "typescript": "catalog:"
+  }
+}

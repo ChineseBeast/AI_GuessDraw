@@ -1,0 +1,64 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+catalog:
+  # Core
+  typescript: ^5.6.3
+  turbo: ^2.3.3
+
+  # React
+  react: ^18.3.1
+  react-dom: ^18.3.1
+  "@types/react": ^18.3.12
+  "@types/react-dom": ^18.3.1
+
+  # Vite
+  vite: ^5.4.11
+  "@vitejs/plugin-react": ^4.3.4
+  typescript-eslint: ^8.16.0
+
+  # NestJS
+  "@nestjs/common": ^10.4.15
+  "@nestjs/core": ^10.4.15
+  "@nestjs/platform-express": ^10.4.15
+  "@nestjs/platform-socket.io": ^10.4.15
+  "@nestjs/websockets": ^10.4.15
+  "@nestjs/cli": ^10.4.9
+  "@nestjs/schematics": ^10.2.3
+  "@nestjs/testing": ^10.4.15
+  reflect-metadata: ^0.2.2
+  rxjs: ^7.8.1
+  socket.io: ^4.8.0
+  socket.io-client: ^4.8.0
+  nanoid: ^3.3.8
+
+  # Taro
+  "@tarojs/cli": ^4.0.9
+  "@tarojs/components": ^4.0.9
+  "@tarojs/taro": ^4.0.9
+  "@tarojs/helper": ^4.0.9
+  "@tarojs/plugin-framework-react": ^4.0.9
+  "@tarojs/react": ^4.0.9
+  "@tarojs/runtime": ^4.0.9
+  "@tarojs/shared": ^4.0.9
+  "@tarojs/plugin-platform-weapp": ^4.0.9
+  "@tarojs/webpack5-runner": ^4.0.9
+  "@types/webpack-env": ^1.18.5
+  babel-preset-taro: ^4.0.9
+  "@babel/preset-react": ^7.25.0
+  postcss: ^8.4.49
+
+  # Lint & Format
+  eslint: ^9.15.0
+  prettier: ^3.4.2
+  "@commitlint/cli": ^19.6.0
+  "@commitlint/config-conventional": ^19.6.0
+  husky: ^9.1.7
+  lint-staged: ^15.2.10
+
+  # Testing
+  vitest: ^2.1.8
+  "@types/node": ^22.10.1
+
+catalogMode: strict

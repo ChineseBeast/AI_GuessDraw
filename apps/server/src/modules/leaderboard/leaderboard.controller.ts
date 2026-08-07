@@ -1,0 +1,74 @@
+import { Controller, Get, Post, Body, Query, HttpCode, HttpException, HttpStatus } from '@nestjs/common';
+import { LeaderboardService } from './leaderboard.service';
+import { AuthService } from '../auth/auth.service';
+import type { LeaderboardPeriod } from '@draw-guess/shared';
+
+interface LeaderboardQueryDto {
+  period?: string;
+  limit?: string;
+  offset?: string;
+}
+
+interface SubmitResultDto {
+  playerId: string;
+  nickname: string;
+  score: number;
+  won: boolean;
+}
+
+@Controller('leaderboard')
+export class LeaderboardController {
+  constructor(
+    private readonly service: LeaderboardService,
+    private readonly authService: AuthService,
+  ) {}
+
+  @Get()
+  @HttpCode(200)
+  getLeaderboard(@Query() query: LeaderboardQueryDto) {
+    const period = this.validatePeriod(query.period ?? 'all');
+    const limit = Math.min(Math.max(parseInt(query.limit ?? '50', 10) || 50, 1), 100);
+    const offset = Math.max(parseInt(query.offset ?? '0', 10) || 0, 0);
+
+    return this.service.getLeaderboard(period, limit, offset);
+  }
+
+  @Post('submit')
+  @HttpCode(201)
+  submitResult(@Body() dto: SubmitResultDto) {
+    if (!dto.playerId || !dto.nickname || dto.score === undefined) {
+      throw new HttpException(
+        { error: 'INVALID_REQUEST', message: '缺少必填参数: playerId, nickname, score' },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+
+    this.service.submitResult({
+      playerId: dto.playerId,
+      nickname: dto.nickname,
+      score: dto.score,
+      won: dto.won ?? false,
+    });
+
+    // 同步更新用户统计
+    const user = this.authService.getUserById(dto.playerId);
+    if (user) {
+      const won = dto.won ?? false;
+      this.authService.updateStats(dto.playerId, {
+        gamesPlayed: user.stats.gamesPlayed + 1,
+        gamesWon: user.stats.gamesWon + (won ? 1 : 0),
+        totalScore: user.stats.totalScore + dto.score,
+        currentStreak: won ? user.stats.currentStreak + 1 : 0,
+      });
+    }
+
+    return { status: 'ok' };
+  }
+
+  private validatePeriod(period: string): LeaderboardPeriod {
+    if (period === 'weekly' || period === 'monthly' || period === 'all') {
+      return period;
+    }
+    return 'all';
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@draw-guess/miniprogram",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "taro build --type weapp --watch",
+    "build": "taro build --type weapp",
+    "lint": "node ../../node_modules/eslint/bin/eslint.js -c ../../eslint.config.mjs 'src/**/*.{ts,tsx}'",
+    "lint:fix": "node ../../node_modules/eslint/bin/eslint.js -c ../../eslint.config.mjs 'src/**/*.{ts,tsx}' --fix",
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "@tarojs/components": "catalog:",
+    "@tarojs/taro": "catalog:",
+    "@tarojs/runtime": "catalog:",
+    "@tarojs/react": "catalog:",
+    "@tarojs/shared": "catalog:",
+    "@draw-guess/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "catalog:",
+    "@tarojs/cli": "catalog:",
+    "@tarojs/helper": "catalog:",
+    "@tarojs/plugin-framework-react": "catalog:",
+    "@tarojs/plugin-platform-weapp": "catalog:",
+    "@tarojs/webpack5-runner": "catalog:",
+    "@types/react": "catalog:",
+    "@types/webpack-env": "catalog:",
+    "babel-preset-taro": "catalog:",
+    "@babel/preset-react": "catalog:",
+    "postcss": "catalog:"
+  }
+}

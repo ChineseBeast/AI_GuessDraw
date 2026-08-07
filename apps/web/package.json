@@ -1,0 +1,35 @@
+{
+  "name": "@draw-guess/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint -c ../../eslint.config.mjs 'src/**/*.{ts,tsx}'",
+    "lint:fix": "eslint -c ../../eslint.config.mjs 'src/**/*.{ts,tsx}' --fix",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@draw-guess/shared": "workspace:*",
+    "@draw-guess/ui": "workspace:*",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "socket.io-client": "catalog:"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@vitejs/plugin-react": "catalog:",
+    "jsdom": "^30.0.1",
+    "typescript": "catalog:",
+    "vite": "catalog:",
+    "vitest": "catalog:"
+  }
+}
