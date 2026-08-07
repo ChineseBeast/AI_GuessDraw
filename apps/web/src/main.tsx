@@ -7,7 +7,7 @@ import { LeaderboardPage } from './pages/leaderboard';
 import { LoginPage, RegisterPage } from './pages/auth';
 import { ProfilePage, SettingsPage } from './pages/user';
 import { AdminPage } from './pages/admin';
-import { useAuth } from './hooks/useAuth';
+import { AuthProvider, useAuth } from './hooks/useAuth';
 
 type Page =
   | 'home'
@@ -23,13 +23,23 @@ type Page =
 
 const App: React.FC = () => {
   const [page, setPage] = useState<Page>('home');
-  const { user, isAuthenticated, logout } = useAuth();
+  const { user, isAuthenticated, logout, initializing } = useAuth();
 
   const [multiplayerConfig, setMultiplayerConfig] = useState<{
     userId: string;
     nickname: string;
     serverUrl: string;
   } | null>(null);
+
+  // 初始化加载中（正在验证 token）显示占位
+  if (initializing) {
+    return (
+      <div style={{ padding: '2rem', textAlign: 'center', color: '#999' }}>
+        <div style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>⏳ 加载中...</div>
+        <div style={{ fontSize: '0.9rem' }}>正在验证会话</div>
+      </div>
+    );
+  }
 
   // 用户标识：已登录用真实 ID，游客用临时 ID
   const currentUserId = user?.id ?? `guest_${Math.random().toString(36).slice(2, 10)}`;
@@ -272,6 +282,8 @@ function modeButtonStyle(color1: string, color2: string): React.CSSProperties {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <AuthProvider>
+      <App />
+    </AuthProvider>
   </React.StrictMode>,
 );

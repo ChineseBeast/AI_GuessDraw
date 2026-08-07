@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useCallback, useState, useEffect } from 'react';
 import { AuthService } from '../services/auth.service';
 
-interface User {
+export interface User {
   id: string;
   username: string;
   email?: string;
@@ -17,12 +17,31 @@ interface User {
   };
 }
 
-export function useAuth() {
+interface AuthContextValue {
+  user: User | null;
+  isAuthenticated: boolean;
+  loading: boolean;
+  error: string | null;
+  initializing: boolean;
+  login: (username: string, password: string) => Promise<{ user: User; accessToken: string }>;
+  register: (username: string, password: string, email?: string) => Promise<{ user: User; accessToken: string }>;
+  logout: () => void;
+  updateProfile: (updates: { username?: string; email?: string; avatar?: string }) => Promise<User>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
+  deleteAccount: (password: string) => Promise<void>;
+  refreshUser: () => Promise<void>;
+  clearError: () => void;
+}
+
+const AuthContext = createContext<AuthContextValue | undefined>(undefined);
+
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => AuthService.getUser());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [initializing, setInitializing] = useState(true);
 
-  // 启动时验证 Token
+  // 启动时验证 Token（刷新后恢复会话）
   useEffect(() => {
     const token = AuthService.getToken();
     if (token && !user) {
@@ -33,7 +52,12 @@ export function useAuth() {
         })
         .catch(() => {
           AuthService.clearAuth();
+        })
+        .finally(() => {
+          setInitializing(false);
         });
+    } else {
+      setInitializing(false);
     }
   }, []);
 
@@ -42,9 +66,11 @@ export function useAuth() {
     setError(null);
     try {
       const result = await AuthService.login(username, password);
-      setUser(result.user);
+      setUser(result.user as User);
+      return result as { user: User; accessToken: string };
     } catch (err) {
-      setError(err instanceof Error ? err.message : '登录失败');
+      const msg = err instanceof Error ? err.message : '登录失败';
+      setError(msg);
       throw err;
     } finally {
       setLoading(false);
@@ -56,9 +82,11 @@ export function useAuth() {
     setError(null);
     try {
       const result = await AuthService.register(username, password, email);
-      setUser(result.user);
+      setUser(result.user as User);
+      return result as { user: User; accessToken: string };
     } catch (err) {
-      setError(err instanceof Error ? err.message : '注册失败');
+      const msg = err instanceof Error ? err.message : '注册失败';
+      setError(msg);
       throw err;
     } finally {
       setLoading(false);
@@ -74,11 +102,12 @@ export function useAuth() {
     setLoading(true);
     setError(null);
     try {
-      const updatedUser = await AuthService.updateProfile(updates);
+      const updatedUser = (await AuthService.updateProfile(updates)) as User;
       setUser(updatedUser);
       return updatedUser;
     } catch (err) {
-      setError(err instanceof Error ? err.message : '更新失败');
+      const msg = err instanceof Error ? err.message : '更新失败';
+      setError(msg);
       throw err;
     } finally {
       setLoading(false);
@@ -91,7 +120,8 @@ export function useAuth() {
     try {
       await AuthService.changePassword(currentPassword, newPassword);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '修改密码失败');
+      const msg = err instanceof Error ? err.message : '修改密码失败';
+      setError(msg);
       throw err;
     } finally {
       setLoading(false);
@@ -105,7 +135,8 @@ export function useAuth() {
       await AuthService.deleteAccount(password);
       setUser(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '注销账号失败');
+      const msg = err instanceof Error ? err.message : '注销账号失败';
+      setError(msg);
       throw err;
     } finally {
       setLoading(false);
@@ -113,15 +144,18 @@ export function useAuth() {
   }, []);
 
   const refreshUser = useCallback(async () => {
-    const u = await AuthService.getMe();
-    setUser(u);
+    const u = (await AuthService.getMe()) as User | null;
+    if (u) setUser(u);
   }, []);
 
-  return {
+  const clearError = useCallback(() => setError(null), []);
+
+  const value: AuthContextValue = {
     user,
     isAuthenticated: !!user,
     loading,
     error,
+    initializing,
     login,
     register,
     logout,
@@ -129,6 +163,16 @@ export function useAuth() {
     changePassword,
     deleteAccount,
     refreshUser,
-    clearError: () => setError(null),
+    clearError,
   };
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+};
+
+export function useAuth(): AuthContextValue {
+  const ctx = useContext(AuthContext);
+  if (!ctx) {
+    throw new Error('useAuth 必须在 <AuthProvider> 内部使用');
+  }
+  return ctx;
 }
