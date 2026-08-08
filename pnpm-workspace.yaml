@@ -2,6 +2,18 @@ packages:
   - "apps/*"
   - "packages/*"
 
+allowBuilds:
+  '@nestjs/core': true
+  '@parcel/watcher': true
+  '@swc/core': true
+  '@tarojs/binding': true
+  '@tarojs/cli': true
+  bcrypt: true
+  core-js: true
+  core-js-pure: true
+  esbuild: true
+  unrs-resolver: true
+
 catalog:
   # Core
   typescript: ^5.6.3
