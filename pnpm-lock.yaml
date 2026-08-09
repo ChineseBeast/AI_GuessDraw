@@ -383,12 +383,6 @@ importers:
       '@testing-library/react':
         specifier: ^16.3.2
         version: 16.3.2(@testing-library/dom@10.4.1)(@types/react-dom@18.3.7(@types/react@18.3.31))(@types/react@18.3.31)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      '@types/react':
-        specifier: 'catalog:'
-        version: 18.3.31
-      '@types/react-dom':
-        specifier: 'catalog:'
-        version: 18.3.7(@types/react@18.3.31)
       jsdom:
         specifier: ^30.0.1
         version: 30.0.1
