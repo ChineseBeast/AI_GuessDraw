@@ -1,7 +1,21 @@
 const API_BASE = '/api/auth';
 
 interface AuthResponse {
-  user: { id: string; username: string; createdAt: string };
+  user: {
+    id: string;
+    username: string;
+    email?: string;
+    avatar?: string;
+    role: 'user' | 'admin';
+    createdAt: string;
+    updatedAt: string;
+    stats?: {
+      gamesPlayed: number;
+      gamesWon: number;
+      totalScore: number;
+      currentStreak: number;
+    };
+  };
   accessToken: string;
   tokenType: string;
   expiresIn: number;
@@ -11,11 +25,14 @@ const TOKEN_KEY = 'draw_guess_token';
 const USER_KEY = 'draw_guess_user';
 
 export const AuthService = {
-  async register(username: string, password: string): Promise<AuthResponse> {
+  async register(username: string, password: string, email?: string): Promise<AuthResponse> {
+    const body: Record<string, string> = { username, password };
+    if (email) body.email = email;
+
     const res = await fetch(`${API_BASE}/register`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username, password }),
+      body: JSON.stringify(body),
     });
 
     if (!res.ok) {
@@ -63,6 +80,91 @@ export const AuthService = {
 
       const data = await res.json();
       return data.user;
+    } catch {
+      return null;
+    }
+  },
+
+  async updateProfile(updates: { username?: string; email?: string; avatar?: string }): Promise<AuthResponse['user']> {
+    const token = AuthService.getToken();
+    if (!token) throw new Error('未登录');
+
+    const res = await fetch(`${API_BASE}/me`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(updates),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: '更新失败' }));
+      throw new Error(err.message || '更新失败');
+    }
+
+    const data = await res.json();
+    AuthService.saveUser(data.user);
+    return data.user;
+  },
+
+  async changePassword(currentPassword: string, newPassword: string): Promise<void> {
+    const token = AuthService.getToken();
+    if (!token) throw new Error('未登录');
+
+    const res = await fetch(`${API_BASE}/me/change-password`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: '修改密码失败' }));
+      throw new Error(err.message || '修改密码失败');
+    }
+  },
+
+  async deleteAccount(password: string): Promise<void> {
+    const token = AuthService.getToken();
+    if (!token) throw new Error('未登录');
+
+    const res = await fetch(`${API_BASE}/me`, {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ password }),
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: '注销账号失败' }));
+      throw new Error(err.message || '注销账号失败');
+    }
+
+    AuthService.clearAuth();
+  },
+
+  async getUserById(id: string): Promise<AuthResponse['user'] | null> {
+    try {
+      const res = await fetch(`${API_BASE}/profile/${id}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.user || null;
+    } catch {
+      return null;
+    }
+  },
+
+  async getUserByUsername(username: string): Promise<AuthResponse['user'] | null> {
+    try {
+      const res = await fetch(`${API_BASE}/profile/username/${encodeURIComponent(username)}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.user || null;
     } catch {
       return null;
     }

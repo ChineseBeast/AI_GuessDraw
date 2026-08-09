@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth, type User } from '../../hooks/useAuth';
 
 interface RegisterPageProps {
-  onRegisterSuccess: () => void;
+  onRegisterSuccess: (user: User) => void;
   onNavigateToLogin: () => void;
 }
 
 export const RegisterPage: React.FC<RegisterPageProps> = ({ onRegisterSuccess, onNavigateToLogin }) => {
   const { register, loading, error, clearError } = useAuth();
   const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -25,6 +26,13 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onRegisterSuccess, o
       setValidationError('用户名至少 2 个字符');
       return;
     }
+    if (email) {
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        setValidationError('邮箱格式不正确');
+        return;
+      }
+    }
     if (password.length < 6) {
       setValidationError('密码至少 6 位');
       return;
@@ -35,8 +43,8 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onRegisterSuccess, o
     }
 
     try {
-      await register(username.trim(), password);
-      onRegisterSuccess();
+      const result = await register(username.trim(), password, email || undefined);
+      onRegisterSuccess(result.user);
     } catch {
       // error handled by useAuth
     }
@@ -67,6 +75,20 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onRegisterSuccess, o
             onChange={(e) => setUsername(e.target.value)}
             placeholder="2-20 个字符"
             autoFocus
+            style={{
+              width: '100%', padding: '0.75rem', fontSize: '1rem',
+              borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        <div style={{ marginBottom: '1rem' }}>
+          <label style={{ display: 'block', marginBottom: '0.3rem', fontWeight: 'bold' }}>邮箱（选填）</label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            placeholder="example@email.com"
             style={{
               width: '100%', padding: '0.75rem', fontSize: '1rem',
               borderRadius: '6px', border: '1px solid #ccc', boxSizing: 'border-box',

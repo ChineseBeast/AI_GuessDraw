@@ -43,7 +43,8 @@
       "core-js",
       "esbuild",
       "@parcel/watcher",
-      "core-js-pure"
+      "core-js-pure",
+      "bcrypt"
     ],
     "ignoredBuiltDependencies": [
       "@nestjs/core",
@@ -63,7 +64,8 @@
       "core-js": "*",
       "esbuild": "*",
       "@parcel/watcher": "*",
-      "core-js-pure": "*"
+      "core-js-pure": "*",
+      "bcrypt": "*"
     }
   }
 }

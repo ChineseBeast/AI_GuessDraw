@@ -1,1 +1,1 @@
-{"@nestjs/core":true,"@swc/core":true,"@tarojs/binding":true,"@tarojs/cli":true,"core-js":true,"esbuild":true,"@parcel/watcher":true,"core-js-pure":true}
+{"bcrypt":true,"unrs-resolver":true}

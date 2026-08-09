@@ -65,6 +65,66 @@ export class WordService implements OnModuleInit {
     return { isCorrect: false, proximity: 'wrong' };
   }
 
+  // ─── 管理接口 ─────────────────────────────────────
+
+  /** 获取所有词库（管理用） */
+  getAllWords(): { easy: string[]; medium: string[]; hard: string[] } {
+    return {
+      easy: [...this.words.easy],
+      medium: [...this.words.medium],
+      hard: [...this.words.hard],
+    };
+  }
+
+  /** 添加词汇到指定难度 */
+  addWord(difficulty: Difficulty, word: string): void {
+    const trimmed = word.trim();
+    if (!trimmed) {
+      throw new Error('词汇不能为空');
+    }
+    const pool = this.words[difficulty];
+    if (!pool) {
+      throw new Error(`无效难度: ${difficulty}`);
+    }
+    if (!pool.includes(trimmed)) {
+      pool.push(trimmed);
+    }
+  }
+
+  /** 批量添加词汇 */
+  addWords(difficulty: Difficulty, words: string[]): { added: number; skipped: number } {
+    const pool = this.words[difficulty];
+    if (!pool) {
+      throw new Error(`无效难度: ${difficulty}`);
+    }
+    let added = 0;
+    let skipped = 0;
+    for (const w of words) {
+      const trimmed = w.trim();
+      if (!trimmed) {
+        skipped++;
+        continue;
+      }
+      if (!pool.includes(trimmed)) {
+        pool.push(trimmed);
+        added++;
+      } else {
+        skipped++;
+      }
+    }
+    return { added, skipped };
+  }
+
+  /** 删除指定词汇 */
+  removeWord(difficulty: Difficulty, word: string): boolean {
+    const pool = this.words[difficulty];
+    if (!pool) return false;
+    const index = pool.indexOf(word.trim());
+    if (index === -1) return false;
+    pool.splice(index, 1);
+    return true;
+  }
+
   // ─── Private ─────────────────────────────────────
 
   private loadWords(): void {

@@ -73,8 +73,11 @@ export function useMultiplayerCanvas({ on, emit, isDrawer, connected }: UseMulti
 
       const seq = ++sequenceRef.current;
 
+      // 映射工具类型：CanvasStroke.tool ('pen'|'eraser') → CanvasActionPayload.type ('draw'|'erase')
+      const actionType = stroke.tool === 'eraser' ? 'erase' : 'draw';
+
       emit('canvas_action', {
-        type: stroke.tool,
+        type: actionType,
         brush: {
           color: stroke.brush.color,
           size: stroke.brush.width,

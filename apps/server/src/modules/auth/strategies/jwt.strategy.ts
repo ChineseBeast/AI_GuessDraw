@@ -2,7 +2,8 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
 import type { JwtPayload } from '../auth.types';
-import type { AuthService } from '../auth.service';
+import { AuthService } from '../auth.service';
+import { appConfig } from '../../../config/app.config';
 
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
@@ -10,7 +11,7 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'draw-guess-ai-dev-secret-key-2026',
+      secretOrKey: appConfig.jwt.secret,
     });
   }
 
@@ -19,6 +20,6 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     if (!user) {
       throw new UnauthorizedException('用户不存在');
     }
-    return { userId: user.id, username: user.username };
+    return { userId: user.id, username: user.username, role: user.role };
   }
 }

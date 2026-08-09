@@ -6,8 +6,8 @@
     "dev": "nest start --watch",
     "build": "nest build",
     "start": "node dist/main",
-    "lint": "eslint -c ../../eslint.config.mjs 'src/**/*.ts'",
-    "lint:fix": "eslint -c ../../eslint.config.mjs 'src/**/*.ts' --fix",
+    "lint": "cd ../.. && eslint -c eslint.config.mjs apps/server/src",
+    "lint:fix": "cd ../.. && eslint -c eslint.config.mjs apps/server/src --fix",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

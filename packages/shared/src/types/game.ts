@@ -4,6 +4,9 @@ export type GameMode = 'single' | 'multiplayer' | 'story';
 /** 难度级别 */
 export type Difficulty = 'easy' | 'medium' | 'hard';
 
+/** AI 服务提供方（单机模式可选模型） */
+export type Provider = 'qwen' | 'minimax';
+
 /** 房间状态 */
 export type RoomStatus = 'waiting' | 'playing';
 
@@ -23,7 +26,7 @@ export type GuessProximity = 'exact' | 'close' | 'length_match' | 'wrong';
 export type CanvasActionType = 'draw' | 'erase' | 'undo' | 'clear';
 
 /** 回合结束原因 */
-export type RoundEndReason = 'all_guessed' | 'timeout';
+export type RoundEndReason = 'all_guessed' | 'timeout' | 'drawer_submitted';
 
 /** 离开原因 */
 export type LeaveReason = 'voluntary' | 'timeout';

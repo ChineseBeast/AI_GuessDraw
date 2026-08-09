@@ -2,6 +2,18 @@ packages:
   - "apps/*"
   - "packages/*"
 
+allowBuilds:
+  '@nestjs/core': true
+  '@parcel/watcher': true
+  '@swc/core': true
+  '@tarojs/binding': true
+  '@tarojs/cli': true
+  bcrypt: true
+  core-js: true
+  core-js-pure: true
+  esbuild: true
+  unrs-resolver: true
+
 catalog:
   # Core
   typescript: ^5.6.3
@@ -31,7 +43,7 @@ catalog:
   rxjs: ^7.8.1
   socket.io: ^4.8.0
   socket.io-client: ^4.8.0
-  nanoid: ^5.0.9
+  nanoid: ^3.3.8
 
   # Taro
   "@tarojs/cli": ^4.0.9

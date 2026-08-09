@@ -1,4 +1,13 @@
-import type { CanvasStroke } from '@draw-guess/shared';
+import type { CanvasStroke, Point } from '@draw-guess/shared';
+
+/** 外部笔画（用于 AI 绘画回放，简化结构） */
+export interface ExternalStroke {
+  points: Point[];
+  color: string;
+  width: number;
+  /** 笔画工具类型（未指定时默认为 pen） */
+  tool?: 'pen' | 'eraser';
+}
 
 /** 工具栏状态 */
 export interface ToolState {
@@ -51,6 +60,8 @@ export interface CanvasRef {
   getUndoCount: () => number;
   /** 画布是否为空 */
   isEmpty: () => boolean;
+  /** 加载外部笔画并逐笔动画绘制（用于 AI 绘画回放） */
+  loadStrokes: (strokes: ExternalStroke[], options?: { animate?: boolean; speed?: number }) => void;
 }
 
 /** 默认工具状态 */

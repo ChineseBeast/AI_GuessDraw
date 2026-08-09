@@ -1,19 +1,20 @@
-import type {
-  OnGatewayConnection,
-  OnGatewayDisconnect} from '@nestjs/websockets';
-import {
-  WebSocketGateway,
-  WebSocketServer,
-  SubscribeMessage,
-  ConnectedSocket,
-  MessageBody,
-} from '@nestjs/websockets';
+import type { OnGatewayConnection, OnGatewayDisconnect } from '@nestjs/websockets';
+import { WebSocketGateway, WebSocketServer, SubscribeMessage, ConnectedSocket, MessageBody } from '@nestjs/websockets';
 import type { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
-import { COUNTDOWN_DURATION, ROUND_RESULT_DURATION, MAX_RECONNECT_TIME } from '@draw-guess/shared';
-import type { RoomManagerService } from '../services/room-manager.service';
-import type { GameEngineService } from '../services/game-engine.service';
-import type { WordService } from '../services/word.service';
+import { JwtService } from '@nestjs/jwt';
+import { COUNTDOWN_DURATION, ROUND_RESULT_DURATION, MAX_RECONNECT_TIME, ROUND_DURATION } from '@draw-guess/shared';
+import { RoomManagerService } from '../services/room-manager.service';
+import { GameEngineService } from '../services/game-engine.service';
+import { WordService } from '../services/word.service';
+import {
+  AIPlayerService,
+  AI_PLAYER_ID,
+  AI_PLAYER_NICKNAME,
+  AI_GUESS_INTERVAL_MS,
+  AI_DRAW_EXTRA_MS,
+} from '../services/ai-player.service';
+import type { JwtPayload } from '../modules/auth/auth.types';
 import type {
   CreateRoomPayload,
   JoinRoomPayload,
@@ -37,11 +38,14 @@ import type {
   RoundEndedEvent,
   GameEndedEvent,
   ErrorEvent,
+  AIStatusEvent,
+  AIGuessEvent,
+  DrawerFinishedEvent,
 } from '../types/websocket.types';
 
 @Injectable()
 @WebSocketGateway({
-  cors: { origin: '*', credentials: true },
+  cors: { origin: '*', credentials: false },
   namespace: '/',
 })
 export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
@@ -51,17 +55,58 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(RoomGateway.name);
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private socketToUser = new Map<string, { userId: string; roomId: string }>();
+  /** AI 猜词循环状态：roomId → 循环上下文（每轮重建，防止旧循环残留） */
+  private aiGuessLoops = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout> | null; inFlight: boolean; lastAttemptAt: number }
+  >();
 
   constructor(
     private readonly roomManager: RoomManagerService,
     private readonly gameEngine: GameEngineService,
     private readonly wordService: WordService,
+    private readonly jwtService: JwtService,
+    private readonly aiPlayerService: AIPlayerService,
   ) {}
 
   // ─── Lifecycle ───────────────────────────────────
 
   handleConnection(client: Socket): void {
+    // 使用 JWT 验证连接（内联 WsAuthGuard 逻辑）
+    const token = this.extractToken(client);
+    if (token) {
+      try {
+        const payload = this.jwtService.verify<JwtPayload>(token);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (client as any).userId = payload.sub;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (client as any).username = payload.username;
+        this.logger.debug(`WS authenticated: ${payload.username} (${client.id})`);
+      } catch {
+        this.logger.warn(`WS invalid token from client: ${client.id}`);
+      }
+    }
     this.logger.log(`Client connected: ${client.id}`);
+  }
+
+  /**
+   * 从客户端连接中提取 Token
+   */
+  private extractToken(client: Socket): string | undefined {
+    // 从 handshake auth 中提取
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const auth = (client.handshake as any).auth;
+    if (auth?.token) {
+      return auth.token;
+    }
+
+    // 从 query 参数中提取
+    const queryToken = client.handshake.query?.token;
+    if (typeof queryToken === 'string') {
+      return queryToken;
+    }
+
+    return undefined;
   }
 
   handleDisconnect(client: Socket): void {
@@ -96,10 +141,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   // ─── Room Events ─────────────────────────────────
 
   @SubscribeMessage('create_room')
-  handleCreateRoom(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: CreateRoomPayload,
-  ): void {
+  handleCreateRoom(@ConnectedSocket() client: Socket, @MessageBody() payload: CreateRoomPayload): void {
     try {
       const userId = this.getUserId(client);
       const nickname = this.getNickname(client);
@@ -110,7 +152,13 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      const room = this.roomManager.createRoom(userId, nickname, payload.maxPlayers, payload.difficulty || 'medium');
+      const room = this.roomManager.createRoom(
+        userId,
+        nickname,
+        payload.maxPlayers,
+        payload.difficulty || 'medium',
+        payload.allowAI,
+      );
 
       // 更新房主的 socketId
       this.roomManager.updatePlayerSocket(room.id, userId, client.id);
@@ -136,10 +184,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('join_room')
-  handleJoinRoom(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: JoinRoomPayload,
-  ): void {
+  handleJoinRoom(@ConnectedSocket() client: Socket, @MessageBody() payload: JoinRoomPayload): void {
     try {
       const userId = this.getUserId(client);
       const nickname = this.getNickname(client);
@@ -265,10 +310,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('canvas_action')
-  handleCanvasAction(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: CanvasActionPayload,
-  ): void {
+  handleCanvasAction(@ConnectedSocket() client: Socket, @MessageBody() payload: CanvasActionPayload): void {
     const mapping = this.socketToUser.get(client.id);
     if (!mapping) return;
 
@@ -307,11 +349,40 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
   }
 
+  @SubscribeMessage('finish_drawing')
+  handleFinishDrawing(@ConnectedSocket() client: Socket): void {
+    const mapping = this.socketToUser.get(client.id);
+    if (!mapping) return;
+
+    const { userId, roomId } = mapping;
+    const game = this.gameEngine.getGame(roomId);
+    if (!game || game.status !== 'playing') return;
+
+    const round = game.rounds[game.currentRound - 1];
+    if (!round || round.status !== 'active') return;
+
+    // 验证是绘画者
+    if (round.drawerId !== userId) return;
+
+    const room = this.roomManager.findById(roomId);
+
+    // AI 参与的房间：提交绘画后本轮继续，给 AI（及其他人）猜词时间，直到超时或全员猜对
+    if (room?.allowAI && room.players.has(AI_PLAYER_ID)) {
+      const event: DrawerFinishedEvent = { drawerId: userId };
+      this.server.to(roomId).emit('drawer_finished', event);
+      this.logger.log(`Drawer ${userId} submitted drawing in AI room ${roomId}, round continues`);
+      return;
+    }
+
+    // 结束当前轮次
+    this.gameEngine.endRound(game, round, 'drawer_submitted');
+    this.broadcastRoundEnd(roomId);
+
+    this.logger.log(`Drawer ${userId} submitted drawing in room ${roomId}`);
+  }
+
   @SubscribeMessage('submit_guess')
-  handleSubmitGuess(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: SubmitGuessPayload,
-  ): void {
+  handleSubmitGuess(@ConnectedSocket() client: Socket, @MessageBody() payload: SubmitGuessPayload): void {
     const mapping = this.socketToUser.get(client.id);
     if (!mapping) return;
 
@@ -326,10 +397,14 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (round.drawerId === userId) return;
 
     // 已猜对的不重复处理
-    if (round.guesses.some(g => g.playerId === userId && g.isCorrect)) return;
+    if (round.guesses.some((g) => g.playerId === userId && g.isCorrect)) return;
 
     const { guess, guesserRank, allGuessed } = this.gameEngine.processGuess(
-      game, round, userId, payload.text, this.wordService,
+      game,
+      round,
+      userId,
+      payload.text,
+      this.wordService,
     );
 
     // 回复猜词者
@@ -348,7 +423,9 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         nickname: this.getPlayerNickname(roomId, userId),
         rank: guesserRank,
         score: guess.score,
-        guessersRemaining: game.drawerOrder.filter(id => id !== round.drawerId).length - round.guesses.filter(g => g.isCorrect).length,
+        guessersRemaining:
+          game.drawerOrder.filter((id) => id !== round.drawerId).length -
+          round.guesses.filter((g) => g.isCorrect).length,
       };
       this.server.to(roomId).emit('correct_guess', correctEvent);
     }
@@ -361,10 +438,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('reconnect')
-  handleReconnect(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: ReconnectPayload,
-  ): void {
+  handleReconnect(@ConnectedSocket() client: Socket, @MessageBody() payload: ReconnectPayload): void {
     const userId = this.getUserId(client);
 
     // 验证 session
@@ -416,12 +490,14 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
           targetWord: isDrawer ? round.targetWord : undefined,
           wordLength: isDrawer ? undefined : round.targetWord.length,
           wordHint: isDrawer ? undefined : '_'.repeat(round.targetWord.length),
-          timeLimit: 60,
+          timeLimit: Math.round((round.durationMs || 60_000) / 1000),
           scores: this.getCurrentScores(room.id),
-          correctGuessers: round.guesses.filter(g => g.isCorrect).map(g => ({
-            playerId: g.playerId,
-            nickname: this.getPlayerNickname(room.id, g.playerId),
-          })),
+          correctGuessers: round.guesses
+            .filter((g) => g.isCorrect)
+            .map((g) => ({
+              playerId: g.playerId,
+              nickname: this.getPlayerNickname(room.id, g.playerId),
+            })),
         });
 
         // 发送画布操作回放
@@ -435,10 +511,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('join_as_spectator')
-  handleJoinAsSpectator(
-    @ConnectedSocket() client: Socket,
-    @MessageBody() payload: JoinRoomPayload,
-  ): void {
+  handleJoinAsSpectator(@ConnectedSocket() client: Socket, @MessageBody() payload: JoinRoomPayload): void {
     try {
       const userId = this.getUserId(client);
       const nickname = this.getNickname(client);
@@ -533,35 +606,225 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const room = this.roomManager.findById(roomId);
     if (!room) return;
 
-    const round = this.gameEngine.startRound(game, this.wordService);
-    // drawer will be used for role assignment below
+    // 本轮绘画者是否为 AI（AI 绘画需要先生成笔画，延长本轮时长）
+    const drawerId = game.drawerOrder[game.currentDrawerIndex % game.drawerOrder.length];
+    const isAIDrawer = drawerId === AI_PLAYER_ID;
+    const roundDurationMs = isAIDrawer ? ROUND_DURATION + AI_DRAW_EXTRA_MS : ROUND_DURATION;
 
-    // 发给绘画者
+    const round = this.gameEngine.startRound(game, this.wordService, roundDurationMs, () => {
+      // 超时结束：广播轮次结果并推进（AI 房画者提交后轮次继续，超时是常见结束路径）
+      this.broadcastRoundEnd(roomId);
+    });
+
+    // 同步玩家角色（画者/猜词者），供玩家列表展示
+    for (const player of room.players.values()) {
+      player.role = player.userId === round.drawerId ? 'drawer' : 'guesser';
+    }
+
+    // 发给每个玩家（使用 server.to(socketId) 避免访问 server.sockets.sockets）
     const socketIds = this.roomManager.getAllSocketIds(room);
     for (const socketId of socketIds) {
-      const socket = this.server.sockets.sockets.get(socketId);
-      if (!socket) continue;
-
       const mapping = this.socketToUser.get(socketId);
       if (!mapping) continue;
 
       if (mapping.userId === round.drawerId) {
         const event: RoundStartedForDrawer = {
           roundNumber: round.roundNumber,
+          drawerId: round.drawerId,
           targetWord: round.targetWord,
           difficulty: round.wordDifficulty,
-          timeLimit: 60,
+          timeLimit: Math.round(round.durationMs / 1000),
         };
-        socket.emit('round_started', event);
+        this.server.to(socketId).emit('round_started', event);
       } else {
         const event: RoundStartedForGuessers = {
           roundNumber: round.roundNumber,
+          drawerId: round.drawerId,
           wordLength: round.targetWord.length,
           wordHint: '_'.repeat(round.targetWord.length),
-          timeLimit: 60,
+          timeLimit: Math.round(round.durationMs / 1000),
         };
-        socket.emit('round_started', event);
+        this.server.to(socketId).emit('round_started', event);
       }
+    }
+
+    // AI 参与：本轮为 AI 作画则驱动 AI 生成笔画，否则（AI 是猜者）启动 AI 猜词循环
+    if (room.allowAI && room.players.has(AI_PLAYER_ID)) {
+      if (isAIDrawer) {
+        this.kickoffAIDrawing(roomId);
+      } else {
+        this.startAIGuessLoop(roomId);
+      }
+    }
+  }
+
+  /**
+   * AI 作为画者：调用 ai-service 生成笔画轨迹，并以 canvas_sync 事件广播给所有玩家。
+   * 生成失败（AI 服务不可用）时按超时结束本轮。
+   */
+  private kickoffAIDrawing(roomId: string): void {
+    const game = this.gameEngine.getGame(roomId);
+    const round = game?.rounds[game.currentRound - 1];
+    if (!game || !round || round.status !== 'active' || round.drawerId !== AI_PLAYER_ID) return;
+
+    const statusEvent: AIStatusEvent = { playerId: AI_PLAYER_ID, status: 'drawing' };
+    this.server.to(roomId).emit('ai_status', statusEvent);
+    this.logger.log(`AI drawing round ${round.roundNumber} started in room ${roomId}`);
+
+    this.aiPlayerService
+      .generateStrokes(round.targetWord, round.wordDifficulty)
+      .then((strokes) => {
+        // 轮次可能已结束/切换，丢弃过期结果
+        const current = this.gameEngine.getGame(roomId);
+        const currentRound = current?.rounds[current.currentRound - 1];
+        if (!current || !currentRound || currentRound !== round || currentRound.status !== 'active') return;
+
+        for (const stroke of strokes) {
+          const syncEvent: CanvasSyncEvent = {
+            sequenceNumber: currentRound.strokes.length + 1,
+            type: 'draw',
+            brush: { color: stroke.color, size: stroke.width, opacity: 1 },
+            points: stroke.points,
+            timestamp: Date.now(),
+          };
+          currentRound.strokes.push(syncEvent);
+          this.server.to(roomId).emit('canvas_sync', syncEvent);
+        }
+
+        const doneEvent: AIStatusEvent = { playerId: AI_PLAYER_ID, status: 'draw_done' };
+        this.server.to(roomId).emit('ai_status', doneEvent);
+        this.logger.log(`AI finished drawing round ${round.roundNumber} in room ${roomId}`);
+      })
+      .catch(() => {
+        // AI 服务不可用：按超时结束本轮，避免卡住
+        const current = this.gameEngine.getGame(roomId);
+        const currentRound = current?.rounds[current.currentRound - 1];
+        if (!current || !currentRound || currentRound !== round || currentRound.status !== 'active') return;
+
+        this.logger.warn(`AI drawing failed in room ${roomId}, ending round ${round.roundNumber}`);
+        this.gameEngine.endRound(current, currentRound, 'timeout');
+        this.broadcastRoundEnd(roomId);
+      });
+  }
+
+  /**
+   * AI 作为猜者：启动猜词循环。每隔 AI_GUESS_INTERVAL_MS 检查一次画布是否有笔画，
+   * 有则调用 ai-service 识别并精确匹配目标词；猜对即停止，直到本轮结束。
+   * 两次猜测之间至少间隔 AI_GUESS_INTERVAL_MS。
+   */
+  private startAIGuessLoop(roomId: string): void {
+    // 重建循环上下文，使旧循环自然失效
+    this.stopAIGuessLoop(roomId);
+    const state = { timer: null as ReturnType<typeof setTimeout> | null, inFlight: false, lastAttemptAt: 0 };
+    this.aiGuessLoops.set(roomId, state);
+
+    const tick = async () => {
+      // 循环上下文已被替换（新一轮）或房间已结束 → 停止
+      if (this.aiGuessLoops.get(roomId) !== state) return;
+
+      const game = this.gameEngine.getGame(roomId);
+      const room = this.roomManager.findById(roomId);
+      if (!game || game.status !== 'playing' || !room || !room.players.has(AI_PLAYER_ID)) return;
+
+      const round = game.rounds[game.currentRound - 1];
+      if (!round || round.status !== 'active' || round.drawerId === AI_PLAYER_ID) return;
+      // AI 已猜对 → 停止（与人类玩家一致：猜对后不再处理）
+      if (round.guesses.some((g) => g.playerId === AI_PLAYER_ID && g.isCorrect)) return;
+
+      const now = Date.now();
+      const hasStrokes = round.strokes.some((s) => s.type === 'draw' || s.type === 'erase');
+      const intervalOk = now - state.lastAttemptAt >= AI_GUESS_INTERVAL_MS;
+
+      if (!hasStrokes || state.inFlight || !intervalOk) {
+        this.scheduleAIGuessTick(state, tick);
+        return;
+      }
+
+      state.inFlight = true;
+      state.lastAttemptAt = now;
+
+      try {
+        const guesses = await this.aiPlayerService.recognizeStrokes(
+          round.strokes,
+          round.targetWord,
+          round.wordDifficulty,
+        );
+
+        // 识别期间本轮可能已结束，丢弃过期结果
+        const current = this.gameEngine.getGame(roomId);
+        const currentRound = current?.rounds[current.currentRound - 1];
+        if (!current || !currentRound || currentRound !== round || currentRound.status !== 'active') return;
+
+        // 精确匹配：完全一致才算猜对（不采用模糊匹配）
+        const matched = guesses.find((g) => g.word.trim() === round.targetWord);
+
+        const aiGuessEvent: AIGuessEvent = {
+          playerId: AI_PLAYER_ID,
+          guesses: guesses.slice(0, 3),
+          isCorrect: matched !== undefined,
+          matchedWord: matched?.word,
+        };
+        this.server.to(roomId).emit('ai_guess', aiGuessEvent);
+
+        if (matched) {
+          const { guess, guesserRank, allGuessed } = this.gameEngine.processAIGuess(
+            current,
+            currentRound,
+            AI_PLAYER_ID,
+            matched.word,
+          );
+
+          if (guesserRank) {
+            const correctEvent: CorrectGuessEvent = {
+              playerId: AI_PLAYER_ID,
+              nickname: AI_PLAYER_NICKNAME,
+              rank: guesserRank,
+              score: guess.score,
+              guessersRemaining:
+                current.drawerOrder.filter((id) => id !== currentRound.drawerId).length -
+                currentRound.guesses.filter((g) => g.isCorrect).length,
+            };
+            this.server.to(roomId).emit('correct_guess', correctEvent);
+          }
+
+          this.logger.log(`AI guessed correctly in room ${roomId}: ${matched.word}`);
+
+          if (allGuessed) {
+            this.gameEngine.endRound(current, currentRound, 'all_guessed');
+            this.broadcastRoundEnd(roomId);
+            return;
+          }
+        }
+      } catch (error) {
+        this.logger.warn(`AI guess attempt failed in room ${roomId}: ${(error as Error).message}`);
+      } finally {
+        state.inFlight = false;
+      }
+
+      // 本轮仍在进行 → 间隔 AI_GUESS_INTERVAL_MS 后继续尝试
+      if (this.aiGuessLoops.get(roomId) === state) {
+        this.scheduleAIGuessTick(state, tick);
+      }
+    };
+
+    this.scheduleAIGuessTick(state, tick);
+    this.logger.log(`AI guess loop started in room ${roomId}`);
+  }
+
+  private scheduleAIGuessTick(
+    state: { timer: ReturnType<typeof setTimeout> | null },
+    tick: () => Promise<void>,
+  ): void {
+    state.timer = setTimeout(() => {
+      void tick();
+    }, AI_GUESS_INTERVAL_MS);
+  }
+
+  private stopAIGuessLoop(roomId: string): void {
+    const state = this.aiGuessLoops.get(roomId);
+    if (state) {
+      if (state.timer) clearTimeout(state.timer);
+      this.aiGuessLoops.delete(roomId);
     }
   }
 
@@ -604,8 +867,11 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
     scores[round.drawerId] = drawerScore;
 
-    const hasNext = game.currentRound < game.totalRounds && game.currentDrawerIndex + 1 < game.drawerOrder.length;
-    const nextDrawerId = hasNext ? game.drawerOrder[game.currentDrawerIndex + 1] : undefined;
+    // 轮次是否还有下一轮（以 totalRounds 为准，画者顺序循环复用）
+    const hasNext = game.currentRound < game.totalRounds;
+    const nextDrawerId = hasNext
+      ? game.drawerOrder[(game.currentDrawerIndex + 1) % game.drawerOrder.length]
+      : undefined;
 
     const event: RoundEndedEvent = {
       roundNumber: round.roundNumber,
@@ -615,7 +881,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       drawerScore,
       scores,
       totalScores,
-      endReason: round.endedAt ? 'all_guessed' : 'timeout',
+      endReason: round.endReason || (round.endedAt ? 'all_guessed' : 'timeout'),
       nextDrawerId,
     };
     this.server.to(roomId).emit('round_ended', event);
@@ -640,11 +906,13 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     const finalScores = this.gameEngine.getFinalScores(game, room);
 
-    const roundsSummary = game.rounds.map(r => ({
+    const roundsSummary = game.rounds.map((r) => ({
       roundNumber: r.roundNumber,
       targetWord: r.targetWord,
       drawer: room.players.get(r.drawerId)?.nickname || 'Unknown',
-      correctGuessers: r.guesses.filter(g => g.isCorrect).map(g => room.players.get(g.playerId)?.nickname || 'Unknown'),
+      correctGuessers: r.guesses
+        .filter((g) => g.isCorrect)
+        .map((g) => room.players.get(g.playerId)?.nickname || 'Unknown'),
     }));
 
     const event: GameEndedEvent = { finalScores, roundsSummary };
@@ -659,22 +927,20 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // 提示观众可以加入下一局，并将观众转为玩家
     if (room.spectators.size > 0) {
+      // 提示观众可以加入下一局（使用 server.to(socketId) 避免访问 sockets.sockets）
       const spectatorIds = [...room.spectators.keys()];
       for (const sid of spectatorIds) {
         const spectator = room.spectators.get(sid);
-        if (spectator) {
-          // 广播给观众：询问是否加入下一局
-          const spectatorSocket = this.server.sockets.sockets.get(spectator.socketId);
-          if (spectatorSocket) {
-            spectatorSocket.emit('join_next_game_prompt', {
-              message: '游戏已结束，是否加入下一局？',
-            });
-          }
+        if (spectator?.socketId) {
+          this.server.to(spectator.socketId).emit('join_next_game_prompt', {
+            message: '游戏已结束，是否加入下一局？',
+          });
         }
       }
     }
 
     this.gameEngine.removeGame(roomId);
+    this.stopAIGuessLoop(roomId);
     this.logger.log(`Game ended in room ${room.inviteCode}`);
   }
 
@@ -691,10 +957,12 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       const round = game.rounds[game.currentRound - 1];
       if (round && round.drawerId === userId && round.status === 'active') {
         // 切换到下一个玩家
-        const remainingPlayers = [...room.players.keys()].filter(id => id !== userId);
+        const remainingPlayers = [...room.players.keys()].filter((id) => id !== userId);
         if (remainingPlayers.length > 0) {
           const newDrawer = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
-          this.gameEngine.switchDrawer(game, round, newDrawer);
+          this.gameEngine.switchDrawer(game, round, newDrawer, () => {
+            this.broadcastRoundEnd(roomId);
+          });
           this.server.to(roomId).emit('player_left', {
             playerId: userId,
             nickname: player.nickname,
@@ -747,11 +1015,20 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   private getUserId(client: Socket): string {
-    // 从 Socket.IO handshake auth 中获取用户 ID
-    return (client.handshake.auth?.userId as string) || `user_${client.id.substring(0, 8)}`;
+    // 优先使用 JWT 验证后设置的 userId
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const verifiedUserId = (client as any).userId;
+    if (verifiedUserId) return verifiedUserId;
+    // 回退到 handshake.auth（游客模式）
+    return (client.handshake.auth?.userId as string) || `guest_${client.id.substring(0, 8)}`;
   }
 
   private getNickname(client: Socket): string {
+    // 优先使用 JWT 验证后设置的 username
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const verifiedUsername = (client as any).username;
+    if (verifiedUsername) return verifiedUsername;
+    // 回退到 handshake.auth（游客模式）
     return (client.handshake.auth?.nickname as string) || `Player_${client.id.substring(0, 4)}`;
   }
 
@@ -762,18 +1039,32 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     return player?.nickname || 'Unknown';
   }
 
-  private mapPlayers(room: { players: Map<string, { userId: string; nickname: string; avatarUrl?: string; role: string; score: number; connectionStatus: string }> }): PlayerInfo[] {
-    return [...room.players.values()].map(p => ({
+  private mapPlayers(room: {
+    players: Map<
+      string,
+      { userId: string; nickname: string; avatarUrl?: string; role: string; score: number; connectionStatus: string; isAI?: boolean }
+    >;
+  }): PlayerInfo[] {
+    return [...room.players.values()].map((p) => ({
       userId: p.userId,
       nickname: p.nickname,
       avatarUrl: p.avatarUrl,
       role: p.role as PlayerInfo['role'],
       score: p.score,
       connectionStatus: p.connectionStatus as PlayerInfo['connectionStatus'],
+      isAI: p.isAI,
     }));
   }
 
-  private mapSinglePlayer(p: { userId: string; nickname: string; avatarUrl?: string; role: string; score: number; connectionStatus: string }): PlayerInfo {
+  private mapSinglePlayer(p: {
+    userId: string;
+    nickname: string;
+    avatarUrl?: string;
+    role: string;
+    score: number;
+    connectionStatus: string;
+    isAI?: boolean;
+  }): PlayerInfo {
     return {
       userId: p.userId,
       nickname: p.nickname,
@@ -781,6 +1072,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       role: p.role as PlayerInfo['role'],
       score: p.score,
       connectionStatus: p.connectionStatus as PlayerInfo['connectionStatus'],
+      isAI: p.isAI,
     };
   }
 }

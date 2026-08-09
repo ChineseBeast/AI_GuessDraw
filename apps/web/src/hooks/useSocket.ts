@@ -12,6 +12,7 @@ interface UseSocketOptions {
 export function useSocket(options: UseSocketOptions) {
   const { serverUrl, userId, nickname, autoConnect = true } = options;
   const [connected, setConnected] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const serviceRef = useRef<SocketService | null>(null);
 
   useEffect(() => {
@@ -22,11 +23,16 @@ export function useSocket(options: UseSocketOptions) {
 
     const unsubscribe = service.on('connect', () => {
       setConnected(true);
+      setError(null);
     });
 
-    // Also listen for disconnect via the service
     const unsubDisconnect = service.on('disconnect', () => {
       setConnected(false);
+    });
+
+    const unsubError = service.on('connect_error', (err: unknown) => {
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(`连接失败: ${msg}`);
     });
 
     setConnected(service.connected);
@@ -34,6 +40,7 @@ export function useSocket(options: UseSocketOptions) {
     return () => {
       unsubscribe();
       unsubDisconnect();
+      unsubError();
     };
   }, [serverUrl, userId, nickname, autoConnect]);
 
@@ -60,6 +67,12 @@ export function useSocket(options: UseSocketOptions) {
       case 'submit_guess':
         service.submitGuess(payload as unknown as { text: string });
         break;
+      case 'finish_drawing':
+        service.finishDrawing();
+        break;
+      case 'accept_join_next_game':
+        service.acceptJoinNextGame();
+        break;
       case 'reconnect':
         service.reconnect(payload as unknown as { roomId: string; sessionToken: string });
         break;
@@ -76,5 +89,5 @@ export function useSocket(options: UseSocketOptions) {
     return service.on<T>(event, handler);
   }, []);
 
-  return { connected, emit, on, socketId: serviceRef.current?.socketId };
+  return { connected, error, emit, on, socketId: serviceRef.current?.socketId };
 }

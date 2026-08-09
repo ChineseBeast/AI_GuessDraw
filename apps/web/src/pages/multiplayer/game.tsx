@@ -7,12 +7,15 @@ import { useMultiplayerCanvas } from '../../hooks/useMultiplayerCanvas';
 import { CanvasView } from './components/CanvasView';
 import { GuessPanel } from './components/GuessPanel';
 import { PlayerList } from './components/PlayerList';
-import type { WSPlayerInfo } from '@draw-guess/shared';
+import type { WSPlayerInfo, AIStatusEvent, AIGuessEvent, DrawerFinishedEvent } from '@draw-guess/shared';
+
+import type { GameStartedEvent } from '@draw-guess/shared';
 
 interface GamePageProps {
   userId: string;
   nickname: string;
   serverUrl: string;
+  gameInit?: GameStartedEvent;
   players?: WSPlayerInfo[];
   hostId?: string;
   onBackToLobby?: () => void;
@@ -23,13 +26,14 @@ export const MultiplayerGame: React.FC<GamePageProps> = ({
   userId,
   nickname,
   serverUrl,
+  gameInit,
   players = [],
   hostId,
   onBackToLobby,
   onNavigateHome,
 }) => {
-  const { connected, emit, on } = useSocket({ serverUrl, userId, nickname });
-  const { game, submitGuess, isDrawer } = useGame({ on, emit });
+  const { connected, emit, on, error: socketError } = useSocket({ serverUrl, userId, nickname });
+  const { game, submitGuess, isDrawer } = useGame({ on, emit, gameInit });
   const { user, isAuthenticated } = useAuth();
 
   const { strokes, sendCanvasAction, sendUndo, sendClear } = useMultiplayerCanvas({
@@ -45,6 +49,8 @@ export const MultiplayerGame: React.FC<GamePageProps> = ({
   const [showJoinPrompt, setShowJoinPrompt] = useState(false);
   const [gamePlayers, setGamePlayers] = useState<WSPlayerInfo[]>(players);
   const scoreSubmittedRef = useRef(false);
+  // AI 玩家状态提示（绘画中/绘画完成/猜词/绘画已提交）
+  const [aiStatus, setAiStatus] = useState<{ text: string; kind: 'drawing' | 'draw_done' | 'guess' | 'guess_correct' | 'drawer_finished' } | null>(null);
 
   // 自动提交分数到排行榜（多人模式）
   useEffect(() => {
@@ -102,6 +108,39 @@ export const MultiplayerGame: React.FC<GamePageProps> = ({
     };
   }, [on]);
 
+  // 监听 AI 玩家状态事件
+  useEffect(() => {
+    const unsub1 = on<AIStatusEvent>('ai_status', (data) => {
+      if (data.status === 'drawing') {
+        setAiStatus({ kind: 'drawing', text: '🤖 AI 正在绘画，请稍候...' });
+      } else if (data.status === 'draw_done') {
+        setAiStatus({ kind: 'draw_done', text: '🤖 AI 已画完，快猜词吧！' });
+      } else if (data.status === 'thinking') {
+        setAiStatus({ kind: 'guess', text: '🤖 AI 正在观察画作...' });
+      }
+    });
+    const unsub2 = on<AIGuessEvent>('ai_guess', (data) => {
+      if (data.isCorrect && data.matchedWord) {
+        setAiStatus({ kind: 'guess_correct', text: `🤖 AI 猜对了！答案是「${data.matchedWord}」` });
+      } else if (data.guesses.length > 0) {
+        const guessText = data.guesses.map((g) => `${g.word}(${Math.round(g.confidence * 100)}%)`).join('、');
+        setAiStatus({ kind: 'guess', text: `🤖 AI 猜了：${guessText}` });
+      }
+    });
+    const unsub3 = on<DrawerFinishedEvent>('drawer_finished', () => {
+      setAiStatus({ kind: 'drawer_finished', text: '✋ 绘画已提交，继续猜词直到本轮结束...' });
+    });
+
+    return () => {
+      unsub1(); unsub2(); unsub3();
+    };
+  }, [on]);
+
+  // 每轮开始清空 AI 状态提示
+  useEffect(() => {
+    setAiStatus(null);
+  }, [game.currentRound]);
+
   // 倒计时
   useEffect(() => {
     if (game.status === 'playing') {
@@ -153,6 +192,13 @@ export const MultiplayerGame: React.FC<GamePageProps> = ({
             }}
           />
         </div>
+        {socketError && (
+          <div style={{ marginTop: '1rem', padding: '1rem', background: '#ffebee', color: '#c62828', borderRadius: '8px', maxWidth: '400px', margin: '1rem auto' }}>
+            <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>❌ 连接失败</p>
+            <p style={{ fontSize: '0.9rem' }}>{socketError}</p>
+            <button onClick={() => window.location.reload()} style={{ marginTop: '0.75rem', padding: '0.5rem 1.5rem', background: '#2196f3', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}>刷新重试</button>
+          </div>
+        )}
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
       </div>
     );
@@ -360,12 +406,27 @@ export const MultiplayerGame: React.FC<GamePageProps> = ({
             onUndo={sendUndo}
             onClear={sendClear}
           />
+
+          {/* AI 玩家状态提示 */}
+          {aiStatus && (
+            <div style={{
+              textAlign: 'center', marginTop: '0.75rem', padding: '0.5rem',
+              background: aiStatus.kind === 'guess_correct' ? '#e8f5e9' : '#ede7f6',
+              borderRadius: '8px', fontSize: '0.95rem', color: aiStatus.kind === 'guess_correct' ? '#2e7d32' : '#4a148c',
+            }}>
+              {aiStatus.text}
+            </div>
+          )}
         </div>
 
         {/* 侧边栏 */}
         <div style={{ flex: 1, minWidth: '220px' }}>
           <PlayerList
-            players={gamePlayers}
+            players={gamePlayers.map(p => ({
+              ...p,
+              // 以当前轮次画者为准，否则所有玩家一直显示为猜词者
+              role: p.userId === game.drawerId ? 'drawer' : p.role,
+            }))}
             currentUserId={userId}
             hostId={hostId}
           />

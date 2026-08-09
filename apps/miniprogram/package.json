@@ -5,8 +5,8 @@
   "scripts": {
     "dev": "taro build --type weapp --watch",
     "build": "taro build --type weapp",
-    "lint": "node ../../node_modules/eslint/bin/eslint.js -c ../../eslint.config.mjs 'src/**/*.{ts,tsx}'",
-    "lint:fix": "node ../../node_modules/eslint/bin/eslint.js -c ../../eslint.config.mjs 'src/**/*.{ts,tsx}' --fix",
+    "lint": "node ../../node_modules/eslint/bin/eslint.js -c ../../eslint.config.mjs src/",
+    "lint:fix": "node ../../node_modules/eslint/bin/eslint.js -c ../../eslint.config.mjs src/ --fix",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },

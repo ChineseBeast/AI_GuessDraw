@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, Query, HttpCode, HttpException, HttpStatus } from '@nestjs/common';
-import type { LeaderboardService } from './leaderboard.service';
+import { LeaderboardService } from './leaderboard.service';
+import { AuthService } from '../auth/auth.service';
 import type { LeaderboardPeriod } from '@draw-guess/shared';
 
 interface LeaderboardQueryDto {
@@ -17,7 +18,10 @@ interface SubmitResultDto {
 
 @Controller('leaderboard')
 export class LeaderboardController {
-  constructor(private readonly service: LeaderboardService) {}
+  constructor(
+    private readonly service: LeaderboardService,
+    private readonly authService: AuthService,
+  ) {}
 
   @Get()
   @HttpCode(200)
@@ -45,6 +49,18 @@ export class LeaderboardController {
       score: dto.score,
       won: dto.won ?? false,
     });
+
+    // 同步更新用户统计
+    const user = this.authService.getUserById(dto.playerId);
+    if (user) {
+      const won = dto.won ?? false;
+      this.authService.updateStats(dto.playerId, {
+        gamesPlayed: user.stats.gamesPlayed + 1,
+        gamesWon: user.stats.gamesWon + (won ? 1 : 0),
+        totalScore: user.stats.totalScore + dto.score,
+        currentStreak: won ? user.stats.currentStreak + 1 : 0,
+      });
+    }
 
     return { status: 'ok' };
   }

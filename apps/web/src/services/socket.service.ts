@@ -34,14 +34,32 @@ export class SocketService {
 
     this.socket.on('connect', () => {
       console.log('[Socket] Connected:', this.socket?.id);
+      const eventHandlers = this.handlers.get('connect');
+      if (eventHandlers) {
+        for (const handler of eventHandlers) {
+          handler(undefined);
+        }
+      }
     });
 
     this.socket.on('disconnect', (reason) => {
       console.log('[Socket] Disconnected:', reason);
+      const eventHandlers = this.handlers.get('disconnect');
+      if (eventHandlers) {
+        for (const handler of eventHandlers) {
+          handler(reason);
+        }
+      }
     });
 
     this.socket.on('connect_error', (error) => {
       console.error('[Socket] Connection error:', error.message);
+      const eventHandlers = this.handlers.get('connect_error');
+      if (eventHandlers) {
+        for (const handler of eventHandlers) {
+          handler(error);
+        }
+      }
     });
 
     // Register all server events
@@ -50,6 +68,7 @@ export class SocketService {
       'player_disconnected', 'player_reconnected', 'host_changed',
       'game_started', 'round_started', 'canvas_sync', 'guess_result',
       'correct_guess', 'round_ended', 'game_ended', 'error',
+      'ai_status', 'ai_guess', 'drawer_finished',
     ];
 
     for (const event of events) {
@@ -103,6 +122,14 @@ export class SocketService {
     this.socket?.emit('submit_guess', payload);
   }
 
+  finishDrawing(): void {
+    this.socket?.emit('finish_drawing');
+  }
+
+  acceptJoinNextGame(): void {
+    this.socket?.emit('accept_join_next_game');
+  }
+
   reconnect(payload: ReconnectPayload): void {
     this.socket?.emit('reconnect', payload);
   }
@@ -128,6 +155,10 @@ export class SocketService {
 let socketInstance: SocketService | null = null;
 
 export function createSocketService(serverUrl: string, userId: string, nickname: string): SocketService {
+  // 如果已有连接的 socket，复用而不新建（避免页面切换时丢失事件）
+  if (socketInstance?.connected) {
+    return socketInstance;
+  }
   if (socketInstance) {
     socketInstance.disconnect();
   }

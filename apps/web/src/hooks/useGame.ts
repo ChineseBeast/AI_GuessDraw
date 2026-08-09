@@ -28,13 +28,14 @@ interface GameState {
 interface UseGameOptions {
   on: <T>(event: string, handler: (data: T) => void) => () => void;
   emit: (event: string, payload?: Record<string, unknown>) => void;
+  gameInit?: GameStartedEvent;
 }
 
-export function useGame({ on, emit }: UseGameOptions) {
+export function useGame({ on, emit, gameInit }: UseGameOptions) {
   const [game, setGame] = useState<GameState>({
-    status: 'waiting',
+    status: gameInit ? 'countdown' : 'waiting',
     currentRound: 0,
-    totalRounds: 0,
+    totalRounds: gameInit?.totalRounds ?? 0,
     timeLimit: 60,
     scores: {},
     correctGuesses: [],
@@ -55,6 +56,7 @@ export function useGame({ on, emit }: UseGameOptions) {
           ...prev,
           status: 'playing',
           currentRound: data.roundNumber,
+          drawerId: data.drawerId,
           targetWord: data.targetWord,
           timeLimit: data.timeLimit,
           guessResult: undefined,
@@ -65,6 +67,7 @@ export function useGame({ on, emit }: UseGameOptions) {
           ...prev,
           status: 'playing',
           currentRound: data.roundNumber,
+          drawerId: data.drawerId,
           wordLength: data.wordLength,
           wordHint: data.wordHint,
           targetWord: undefined,

@@ -14,6 +14,7 @@ export const SinglePlayerPage: React.FC<SinglePlayerPageProps> = ({ onNavigateHo
     return (
       <SinglePlayerGame
         difficulty={difficulty}
+        provider="minimax"
         onNavigateHome={() => setDifficulty(null)}
       />
     );
@@ -22,8 +23,11 @@ export const SinglePlayerPage: React.FC<SinglePlayerPageProps> = ({ onNavigateHo
   return (
     <div style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
       <h1>🎨 单机模式</h1>
-      <p style={{ color: '#666', marginBottom: '2rem' }}>
-        与 AI 进行 1v1 绘画对战！你画我猜，AI 画你猜，5 轮决胜负。
+      <p style={{ color: '#666', marginBottom: '0.5rem' }}>
+        与 MiniMax-M3 进行 1v1 绘画对战！你画我猜，AI 画你猜，5 轮决胜负。
+      </p>
+      <p style={{ color: '#999', fontSize: '0.85rem', marginBottom: '2rem' }}>
+        当前 AI：MiniMax-M3
       </p>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -40,13 +44,13 @@ export const SinglePlayerPage: React.FC<SinglePlayerPageProps> = ({ onNavigateHo
               cursor: 'pointer',
               transition: 'all 0.2s ease',
             }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.borderColor = '#2196f3';
-              e.currentTarget.style.boxShadow = '0 2px 8px rgba(33,150,243,0.2)';
+            onMouseEnter={(event) => {
+              event.currentTarget.style.borderColor = '#2196f3';
+              event.currentTarget.style.boxShadow = '0 2px 8px rgba(33,150,243,0.2)';
             }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.borderColor = '#e0e0e0';
-              e.currentTarget.style.boxShadow = 'none';
+            onMouseLeave={(event) => {
+              event.currentTarget.style.borderColor = '#e0e0e0';
+              event.currentTarget.style.boxShadow = 'none';
             }}
           >
             <div style={{ fontSize: '1.2rem', fontWeight: 'bold', marginBottom: '0.3rem' }}>

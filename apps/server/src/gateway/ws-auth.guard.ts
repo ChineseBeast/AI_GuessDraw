@@ -1,6 +1,16 @@
+/**
+ * WebSocket JWT 认证守卫（可选工具类）
+ * 
+ * 注意：当前 RoomGateway 已将 JWT 验证逻辑内联到 handleConnection 方法中，
+ * 此 Guard 作为备用实现保留，可用于其他需要 WebSocket 认证的场景。
+ * 
+ * 使用方式（如需启用）：
+ * 在 @WebSocketGateway 装饰器或方法上使用 @UseGuards(WsAuthGuard)
+ * 或在 handleConnection 中手动调用 this.wsAuthGuard.canActivate(context)
+ */
 import type { CanActivate, ExecutionContext } from '@nestjs/common';
 import { Injectable, Logger } from '@nestjs/common';
-import type { JwtService } from '@nestjs/jwt';
+import { JwtService } from '@nestjs/jwt';
 import type { Socket } from 'socket.io';
 import type { JwtPayload } from '../modules/auth/auth.types';
 
