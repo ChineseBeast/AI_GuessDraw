@@ -12,7 +12,7 @@ interface StoryPageProps {
   onNavigateHome: () => void;
 }
 
-const THEMES: Array<{ id: StoryTheme; title: string; description: string; accent: string }> = [
+const THEMES: { id: StoryTheme; title: string; description: string; accent: string }[] = [
   { id: 'fantasy', title: '奇幻森林', description: '点亮迷雾中的魔法线索', accent: '#7c3aed' },
   { id: 'space', title: '失重航线', description: '绘制穿过星云的回家路线', accent: '#2563eb' },
   { id: 'underwater', title: '深海灯塔', description: '让沉睡的珊瑚城重新歌唱', accent: '#0891b2' },

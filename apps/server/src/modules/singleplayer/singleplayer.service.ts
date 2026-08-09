@@ -95,7 +95,7 @@ export class SinglePlayerService {
     imageBase64: string,
     targetWord: string,
     difficulty: Difficulty,
-    provider: string = 'qwen'
+    provider = 'qwen'
   ): Promise<AIRecognizeResponse> {
     // 验证图片不为空
     if (!imageBase64 || imageBase64.length < 100) {
@@ -152,7 +152,7 @@ export class SinglePlayerService {
    * AI 绘画生成：调用 ai-service 根据目标词生成笔画轨迹（绘画行为）。
    * ai-service 不可用时抛出 AI_SERVICE_UNAVAILABLE。
    */
-  async generateDrawing(targetWord: string, difficulty: Difficulty, provider: string = 'qwen'): Promise<unknown> {
+  async generateDrawing(targetWord: string, difficulty: Difficulty, provider = 'qwen'): Promise<unknown> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), AI_SERVICE_TIMEOUT_MS); // 千问 flash 绘画 ~22s，最坏 90s + 兜底余量
 

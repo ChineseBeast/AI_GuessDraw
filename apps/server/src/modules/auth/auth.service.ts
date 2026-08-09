@@ -75,7 +75,8 @@ export class AuthService {
 
   /** 从 UserRecord 中移除 passwordHash，返回安全用户对象 */
   private toSafeUser(user: UserRecord): PublicUserProfile {
-    const { passwordHash: _passwordHash, ...safeUser } = user;
+    const { passwordHash, ...safeUser } = user;
+    void passwordHash; // 显式忽略敏感字段
     return safeUser;
   }
 

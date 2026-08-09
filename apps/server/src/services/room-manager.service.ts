@@ -19,7 +19,7 @@ export class RoomManagerService {
     hostNickname: string,
     maxPlayers: number,
     difficulty: Difficulty,
-    allowAI: boolean = false,
+    allowAI = false,
   ): Room {
     const id = this.generateRoomId();
     const inviteCode = this.generateUniqueInviteCode();

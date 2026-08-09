@@ -11,7 +11,7 @@ import type {
 
 interface StoryContent {
   title: string;
-  chapters: Array<Omit<StoryChapter, 'isCompleted' | 'isUnlocked'>>;
+  chapters: Omit<StoryChapter, 'isCompleted' | 'isUnlocked'>[];
 }
 
 const AI_SERVICE_URL = process.env.AI_SERVICE_URL?.replace(/\/$/, '') || 'http://localhost:8000';
@@ -128,7 +128,7 @@ export class StoryService {
     try {
       const response = await this.request('/api/v1/ai/generate-story', { theme, provider });
       if (!response?.title || !Array.isArray(response.chapters) || response.chapters.length !== 3) return null;
-      return response as StoryContent;
+      return response as unknown as StoryContent;
     } catch {
       return null;
     }
@@ -151,13 +151,13 @@ export class StoryService {
         provider,
       });
       if (typeof response?.score !== 'number' || !response.feedback) return null;
-      return response as DrawingEvaluation;
+      return response as unknown as DrawingEvaluation;
     } catch {
       return null;
     }
   }
 
-  private async request(path: string, body: unknown): Promise<any> {
+  private async request(path: string, body: unknown): Promise<Record<string, unknown> | null> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), STORY_TIMEOUT_MS);
     try {
