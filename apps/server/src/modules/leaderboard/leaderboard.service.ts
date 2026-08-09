@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { LeaderboardPeriod } from '@draw-guess/shared';
 import type { LeaderboardRecord } from './leaderboard.types';
+import { AuthService } from '../auth/auth.service';
 
 @Injectable()
 export class LeaderboardService {
@@ -8,6 +9,8 @@ export class LeaderboardService {
   private weekly = new Map<string, LeaderboardRecord>();
   private monthly = new Map<string, LeaderboardRecord>();
   private allTime = new Map<string, LeaderboardRecord>();
+
+  constructor(private readonly authService: AuthService) {}
 
   /**
    * 提交游戏结果
@@ -44,6 +47,17 @@ export class LeaderboardService {
     updateRecord(this.weekly);
     updateRecord(this.monthly);
     updateRecord(this.allTime);
+
+    // 同步更新用户统计（用户不存在则跳过，不影响排行榜记录）
+    const user = this.authService.getUserById(params.playerId);
+    if (user) {
+      this.authService.updateStats(params.playerId, {
+        gamesPlayed: user.stats.gamesPlayed + 1,
+        gamesWon: user.stats.gamesWon + (params.won ? 1 : 0),
+        totalScore: user.stats.totalScore + params.score,
+        currentStreak: params.won ? user.stats.currentStreak + 1 : 0,
+      });
+    }
   }
 
   /**

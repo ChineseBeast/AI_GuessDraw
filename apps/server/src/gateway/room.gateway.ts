@@ -15,6 +15,7 @@ import {
   AI_DRAW_EXTRA_MS,
 } from '../services/ai-player.service';
 import type { JwtPayload } from '../modules/auth/auth.types';
+import { LeaderboardService } from '../modules/leaderboard/leaderboard.service';
 import type {
   CreateRoomPayload,
   JoinRoomPayload,
@@ -67,6 +68,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     private readonly wordService: WordService,
     private readonly jwtService: JwtService,
     private readonly aiPlayerService: AIPlayerService,
+    private readonly leaderboardService: LeaderboardService,
   ) {}
 
   // ─── Lifecycle ───────────────────────────────────
@@ -905,6 +907,18 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (!room) return;
 
     const finalScores = this.gameEngine.getFinalScores(game, room);
+
+    // server 端自动提交成绩：不依赖前端在线，玩家断线/刷新也不丢成绩；AI 玩家不参与排行
+    for (const score of finalScores) {
+      const player = room.players.get(score.playerId);
+      if (player?.isAI) continue;
+      this.leaderboardService.submitResult({
+        playerId: score.playerId,
+        nickname: score.nickname,
+        score: score.totalScore,
+        won: score.rank === 1,
+      });
+    }
 
     const roundsSummary = game.rounds.map((r) => ({
       roundNumber: r.roundNumber,
