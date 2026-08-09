@@ -1,12 +1,22 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { LeaderboardService } from './leaderboard.service';
+import { AuthService } from '../auth/auth.service';
 
 describe('LeaderboardService', () => {
   let service: LeaderboardService;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
-      providers: [LeaderboardService],
+      providers: [
+        LeaderboardService,
+        {
+          provide: AuthService,
+          useValue: {
+            getUserById: jest.fn(() => null),
+            updateStats: jest.fn(),
+          },
+        },
+      ],
     }).compile();
 
     service = module.get<LeaderboardService>(LeaderboardService);
@@ -100,7 +110,9 @@ describe('LeaderboardService', () => {
     });
 
     it('should return empty entries for empty leaderboard', () => {
-      const emptyService = new LeaderboardService();
+      const emptyService = new LeaderboardService(
+        { getUserById: jest.fn(() => null), updateStats: jest.fn() } as unknown as AuthService,
+      );
       const board = emptyService.getLeaderboard('all');
       expect(board.entries).toEqual([]);
       expect(board.total).toBe(0);

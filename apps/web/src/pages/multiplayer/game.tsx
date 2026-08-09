@@ -1,8 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useSocket } from '../../hooks/useSocket';
 import { useGame } from '../../hooks/useGame';
-import { useAuth } from '../../hooks/useAuth';
-import { LeaderboardService } from '../../services/leaderboard.service';
 import { useMultiplayerCanvas } from '../../hooks/useMultiplayerCanvas';
 import { CanvasView } from './components/CanvasView';
 import { GuessPanel } from './components/GuessPanel';
@@ -34,7 +32,6 @@ export const MultiplayerGame: React.FC<GamePageProps> = ({
 }) => {
   const { connected, emit, on, error: socketError } = useSocket({ serverUrl, userId, nickname });
   const { game, submitGuess, isDrawer } = useGame({ on, emit, gameInit });
-  const { user, isAuthenticated } = useAuth();
 
   const { strokes, sendCanvasAction, sendUndo, sendClear } = useMultiplayerCanvas({
     on,
@@ -48,35 +45,8 @@ export const MultiplayerGame: React.FC<GamePageProps> = ({
   const [isSpectator, setIsSpectator] = useState(false);
   const [showJoinPrompt, setShowJoinPrompt] = useState(false);
   const [gamePlayers, setGamePlayers] = useState<WSPlayerInfo[]>(players);
-  const scoreSubmittedRef = useRef(false);
   // AI 玩家状态提示（绘画中/绘画完成/猜词/绘画已提交）
   const [aiStatus, setAiStatus] = useState<{ text: string; kind: 'drawing' | 'draw_done' | 'guess' | 'guess_correct' | 'drawer_finished' } | null>(null);
-
-  // 自动提交分数到排行榜（多人模式）
-  useEffect(() => {
-    if (
-      game.status === 'game_end' &&
-      game.gameEnded &&
-      isAuthenticated &&
-      !scoreSubmittedRef.current
-    ) {
-      scoreSubmittedRef.current = true;
-      const myScore = game.gameEnded.finalScores.find((ps) => ps.playerId === userId);
-      if (myScore) {
-        LeaderboardService.submitResult({
-          playerId: user!.id,
-          nickname: user!.username,
-          score: myScore.totalScore,
-          won: myScore.rank === 1,
-        }).catch(() => {
-          // 静默失败
-        });
-      }
-    }
-    if (game.status !== 'game_end') {
-      scoreSubmittedRef.current = false;
-    }
-  }, [game.status, game.gameEnded, isAuthenticated, user, userId]);
 
   // 更新玩家列表
   useEffect(() => {
