@@ -34,7 +34,10 @@
       "Bash(git checkout *)",
       "Bash(git add *)",
       "Bash(git commit *)",
-      "Bash(git config *)"
+      "Bash(git config *)",
+      "Bash(git branch *)",
+      "Bash(git rebase *)",
+      "Bash(gh auth *)"
     ]
   }
 }

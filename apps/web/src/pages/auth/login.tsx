@@ -1,13 +1,15 @@
 import React, { useState } from 'react';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth, type User } from '../../hooks/useAuth';
 
 interface LoginPageProps {
-  onLoginSuccess: () => void;
+  onLoginSuccess: (user: User) => void;
   onNavigateToRegister: () => void;
   onSkip?: () => void;
+  /** 顶部提示（如：联机模式需登录） */
+  notice?: string;
 }
 
-export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onNavigateToRegister, onSkip }) => {
+export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onNavigateToRegister, onSkip, notice }) => {
   const { login, loading, error, clearError } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -17,8 +19,8 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onNavigate
     if (!username.trim() || !password.trim()) return;
 
     try {
-      await login(username.trim(), password);
-      onLoginSuccess();
+      const result = await login(username.trim(), password);
+      onLoginSuccess(result.user);
     } catch {
       // error handled by useAuth
     }
@@ -27,6 +29,15 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onNavigate
   return (
     <div style={{ padding: '2rem', maxWidth: '400px', margin: '0 auto' }}>
       <h1 style={{ textAlign: 'center', marginBottom: '1.5rem' }}>🔐 登录</h1>
+
+      {notice && (
+        <div style={{
+          padding: '0.75rem', marginBottom: '1rem', background: '#fff3e0',
+          color: '#e65100', borderRadius: '8px', textAlign: 'center', fontSize: '0.95rem',
+        }}>
+          {notice}
+        </div>
+      )}
 
       {error && (
         <div style={{
@@ -97,7 +108,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess, onNavigate
             onClick={onSkip}
             style={{ background: 'none', border: 'none', color: '#999', cursor: 'pointer', fontSize: '0.9rem' }}
           >
-            跳过登录，游客体验 →
+            游客登录（免注册）→
           </button>
         </div>
       )}

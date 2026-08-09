@@ -1,14 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSocket } from '../../hooks/useSocket';
 import { useRoom } from '../../hooks/useRoom';
-import type { GameStartedEvent } from '@draw-guess/shared';
+import type { GameStartedEvent, WSPlayerInfo } from '@draw-guess/shared';
 
 interface LobbyProps {
   userId: string;
   nickname: string;
   serverUrl: string;
   onNavigateHome?: () => void;
-  onGameStarted?: (gameInit: GameStartedEvent) => void;
+  onGameStarted?: (gameInit: GameStartedEvent, players: WSPlayerInfo[], hostId: string) => void;
 }
 
 export const MultiplayerLobby: React.FC<LobbyProps> = ({ userId, nickname, serverUrl, onNavigateHome, onGameStarted }) => {
@@ -17,13 +17,19 @@ export const MultiplayerLobby: React.FC<LobbyProps> = ({ userId, nickname, serve
 
   const [maxPlayers, setMaxPlayers] = useState(4);
   const [difficulty, setDifficulty] = useState<'easy' | 'medium' | 'hard'>('medium');
+  const [allowAI, setAllowAI] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+
+  // 用 ref 保存最新房间快照，避免监听器因房间变化反复重建
+  const roomRef = useRef(room);
+  roomRef.current = room;
 
   // 监听游戏开始事件
   useEffect(() => {
     const unsub = on<GameStartedEvent>('game_started', (data) => {
-      onGameStarted?.(data);
+      const current = roomRef.current;
+      onGameStarted?.(data, current?.players ?? [], current?.hostId ?? '');
     });
     return unsub;
   }, [on, onGameStarted]);
@@ -54,6 +60,12 @@ export const MultiplayerLobby: React.FC<LobbyProps> = ({ userId, nickname, serve
     return (
       <div style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto' }}>
         <h2>🏠 房间大厅</h2>
+        {error && (
+          <div style={{ background: '#ffebee', padding: '0.75rem', borderRadius: '6px', marginBottom: '1rem', color: '#c62828' }}>
+            ❌ {error}
+            <button onClick={clearError} style={{ marginLeft: '1rem', background: 'none', border: 'none', cursor: 'pointer', color: '#666' }}>✕</button>
+          </div>
+        )}
         <div style={{ background: '#f0f4ff', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }}>
           <p><strong>邀请码：</strong><span style={{ fontSize: '2rem', letterSpacing: '0.3rem', fontFamily: 'monospace' }}>{room.inviteCode}</span></p>
           <p>把邀请码分享给朋友，让他们加入你的房间！</p>
@@ -75,8 +87,9 @@ export const MultiplayerLobby: React.FC<LobbyProps> = ({ userId, nickname, serve
               }}
             >
               <span>
-                {p.userId === room.hostId ? '👑 ' : '🎮 '}
+                {p.isAI ? '🤖 ' : p.userId === room.hostId ? '👑 ' : '🎮 '}
                 {p.nickname}
+                {p.isAI && ' (AI)'}
                 {p.connectionStatus === 'disconnected' && ' (断线中...)'}
               </span>
               <span style={{ color: '#666', fontSize: '0.85rem' }}>
@@ -87,24 +100,28 @@ export const MultiplayerLobby: React.FC<LobbyProps> = ({ userId, nickname, serve
         </ul>
 
         {room.status === 'waiting' && (
-          <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem' }}>
-            <button
-              onClick={() => {
-                emit('start_game');
-              }}
-              style={{
-                padding: '0.75rem 2rem',
-                fontSize: '1.1rem',
-                background: '#4caf50',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                cursor: 'pointer',
-              }}
-              disabled={room.players.length < 2}
-            >
-              🚀 开始游戏 ({room.players.length}人)
-            </button>
+          <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+            {userId === room.hostId ? (
+              <button
+                onClick={() => {
+                  emit('start_game');
+                }}
+                style={{
+                  padding: '0.75rem 2rem',
+                  fontSize: '1.1rem',
+                  background: '#4caf50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  cursor: 'pointer',
+                }}
+                disabled={room.players.length < 2}
+              >
+                🚀 开始游戏 ({room.players.length}人)
+              </button>
+            ) : (
+              <p style={{ color: '#ff9800', fontWeight: 'bold' }}>⏳ 等待房主开始游戏...</p>
+            )}
             <button
               onClick={() => emit('leave_room')}
               style={{
@@ -248,10 +265,24 @@ export const MultiplayerLobby: React.FC<LobbyProps> = ({ userId, nickname, serve
               ))}
             </div>
           </div>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={allowAI}
+                onChange={(e) => setAllowAI(e.target.checked)}
+                style={{ width: '1.1rem', height: '1.1rem', cursor: 'pointer' }}
+              />
+              <span style={{ fontWeight: 'bold' }}>🤖 允许 AI 参与</span>
+            </label>
+            <p style={{ fontSize: '0.82rem', color: '#888', marginTop: '0.4rem' }}>
+              开启后 AI 将作为一名玩家加入房间，每轮随机分配画者/猜者角色（AI 占 1 个玩家位）
+            </p>
+          </div>
           <div style={{ display: 'flex', gap: '1rem' }}>
             <button
               onClick={() => {
-                createRoom(maxPlayers, difficulty);
+                createRoom(maxPlayers, difficulty, allowAI);
               }}
               style={{
                 flex: 1,

@@ -44,6 +44,11 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
   const [roundTransition, setRoundTransition] = React.useState(false);
   const [hintVisible, setHintVisible] = React.useState(false);
 
+  // 轮次切换时重置提示状态，避免上一轮点开的提示残留到下一轮（按钮保持按下/toast 直接弹出）
+  useEffect(() => {
+    setHintVisible(false);
+  }, [currentRound?.roundNumber]);
+
   // AI 画轮次：进入 drawing 阶段后请求 AI 生成笔画并在 Canvas 上动画绘制
   const aiDrawTriggeredRef = useRef(false);
   useEffect(() => {
@@ -240,6 +245,8 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
 
   // 轮次结束 — 展示结果
   if (state.game?.status === 'round_end' && currentRound) {
+    // 局部引用：避免在 map 回调中丢失 state.aiResult 的非空收窄
+    const aiResult = state.aiResult;
     return (
       <div style={{ padding: '2rem', maxWidth: '600px', margin: '0 auto', textAlign: 'center' }}>
         <h2>📊 第 {currentRound.roundNumber} 轮结束</h2>
@@ -248,28 +255,48 @@ export const SinglePlayerGame: React.FC<SinglePlayerGameProps> = ({ difficulty, 
           答案是：<strong style={{ color: '#e91e63' }}>{currentRound.targetWord}</strong>
         </p>
 
-        {isUserDrawing && state.aiResult && (
+        {isUserDrawing && aiResult && (
           <div style={{ margin: '1rem 0' }}>
             <p>AI 的猜测：</p>
-            {state.aiResult.guesses.length > 0 ? (
+            {aiResult.guesses.length > 0 ? (
               <div
                 style={{
-                  display: 'inline-block',
-                  padding: '0.5rem 1.2rem',
-                  borderRadius: '20px',
-                  background: state.aiResult.isCorrect ? '#e8f5e9' : '#fff3e0',
-                  color: state.aiResult.isCorrect ? '#2e7d32' : '#e65100',
-                  fontWeight: 'bold',
-                  fontSize: '1.2rem',
+                  display: 'flex',
+                  gap: '0.5rem',
+                  justifyContent: 'center',
+                  flexWrap: 'wrap',
                 }}
               >
-                {state.aiResult.guesses[0].word}（{Math.round(state.aiResult.guesses[0].confidence * 100)}%）
+                {aiResult.guesses.map((g, i) => {
+                  // 命中项（matchedGuess）与首个猜测可能不是同一个，需单独高亮
+                  const isMatched = !!aiResult.matchedGuess && g.word === aiResult.matchedGuess.word;
+                  return (
+                    <span
+                      key={i}
+                      style={{
+                        padding: '0.5rem 1.2rem',
+                        borderRadius: '20px',
+                        background: isMatched ? '#e8f5e9' : '#fff3e0',
+                        color: isMatched ? '#2e7d32' : '#e65100',
+                        fontWeight: 'bold',
+                        fontSize: '1.2rem',
+                        border: isMatched ? '2px solid #4caf50' : 'none',
+                      }}
+                    >
+                      {g.word}（{Math.round(g.confidence * 100)}%）
+                    </span>
+                  );
+                })}
               </div>
             ) : (
               <span style={{ color: '#999' }}>AI 未能给出猜测</span>
             )}
-            <p style={{ marginTop: '0.5rem', color: state.aiResult.isCorrect ? '#2e7d32' : '#f44336' }}>
-              {state.aiResult.isCorrect ? '✅ AI 猜对了！' : '❌ AI 没有猜对'}
+            <p style={{ marginTop: '0.5rem', color: aiResult.isCorrect ? '#2e7d32' : '#f44336' }}>
+              {aiResult.isCorrect && aiResult.matchedGuess
+                ? `✅ AI 猜对了！它猜的是「${aiResult.matchedGuess.word}」`
+                : aiResult.isCorrect
+                  ? '✅ AI 猜对了！'
+                  : '❌ AI 没有猜对'}
             </p>
           </div>
         )}

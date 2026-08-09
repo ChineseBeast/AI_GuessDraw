@@ -119,8 +119,8 @@ export function useRoom({ on, emit }: UseRoomOptions) {
     };
   }, [on]);
 
-  const createRoom = useCallback((maxPlayers: number, difficulty: string) => {
-    emit('create_room', { maxPlayers, difficulty } as unknown as Record<string, unknown>);
+  const createRoom = useCallback((maxPlayers: number, difficulty: string, allowAI = false) => {
+    emit('create_room', { maxPlayers, difficulty, allowAI } as unknown as Record<string, unknown>);
   }, [emit]);
 
   const joinRoom = useCallback((inviteCode: string) => {

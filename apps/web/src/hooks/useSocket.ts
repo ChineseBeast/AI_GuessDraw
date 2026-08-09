@@ -67,6 +67,12 @@ export function useSocket(options: UseSocketOptions) {
       case 'submit_guess':
         service.submitGuess(payload as unknown as { text: string });
         break;
+      case 'finish_drawing':
+        service.finishDrawing();
+        break;
+      case 'accept_join_next_game':
+        service.acceptJoinNextGame();
+        break;
       case 'reconnect':
         service.reconnect(payload as unknown as { roomId: string; sessionToken: string });
         break;

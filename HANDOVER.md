@@ -9,7 +9,7 @@
 
 ## 0. 一句话定位
 
-`AI_GuessDraw`（AI 你画我猜）—— AI 驱动的你画我猜游戏，支持单机 / 联机 / 故事三种模式。当前分支 `dev-xj` 的核心改动：**接入双 AI provider（通义千问 `qwen3.7-flash` + MiniMax `MiniMax-M3`），单机模式可切换模型；AI 画我猜改为两步生成（先绘画提示词再笔画）；用户管理模块完善（资料编辑/改密/注销/公开查询 + JWT 配置集中化 + WebSocket 认证修复）；后台管理模块新增（仪表盘/用户/房间/词库管理 + AdminGuard 角色鉴权）；AI Service 可通过 uv 在无 root 环境运行**。
+`AI_GuessDraw`（AI 你画我猜）—— AI 驱动的你画我猜游戏，支持单机 / 联机 / 故事三种模式。当前分支 `dev-gd` 的核心改动：**完成三主题、三章节故事模式；单机与故事模式固定使用 MiniMax `MiniMax-M3`，取消前端模型选择页；保留 AI 画我猜两步生成、用户管理和后台管理能力**。
 
 - 仓库：`https://github.com/ChineseBeast/AI_GuessDraw.git`
 - 当前分支：`dev-xj`（tracking `origin/dev-xj`）
@@ -85,11 +85,11 @@ uv pip install fastapi "uvicorn[standard]" pydantic httpx python-dotenv Pillow
 
 ## 3. 当前实现状态（基于 dev-xj 实际源码）
 
-### 单机模式（5 轮，双 AI provider 可切换）
+### 单机模式（5 轮，固定 MiniMax-M3）
 
 流程：选难度 → **选 AI 画家（MiniMax / 千问）** → 画布绘画 → 提交 → AI 识别猜词 → 轮换角色（`user_draws`/`ai_draws` 按轮次奇偶交替）→ 计分结算 → 5 轮决胜负。
 
-**双 AI provider（代码已实现）**：单机模式入口选完难度后弹「选择 AI 画家」页（`PROVIDER_LEVELS`），选 `qwen`（通义千问 `qwen3.7-flash`，OpenAI 兼容端点）或 `minimax`（MiniMax `MiniMax-M3`，Anthropic 协议端点）。provider 从前端 `web → server → ai-service` 全链路透传（body 加 `provider` 字段）。
+**固定 MiniMax-M3**：单机模式选完难度后直接开始，不再展示「选择 AI 画家」页。前端固定传递 `provider=minimax`，通过 `web → server → ai-service` 调用 MiniMax Anthropic 兼容端点。
 
 #### 我画AI猜（`user_draws`，代码已实现）
 
@@ -393,7 +393,7 @@ Web (AdminPage / AdminService，Authorization: Bearer <admin JWT>)
 | --- | --------------------- | --------------------------------------------------------------------------- |
 | 001 | Monorepo 脚手架       | 已完成                                                                      |
 | 002 | WebSocket 房间系统    | 代码存在（dev-pqx 遗留），本分支未验证                                      |
-| 003 | 单机画布与 AI 对战    | 本分支重点：双 provider + 两步 AI 画 + 多次猜测已实现；计分/降级/测试待完善 |
+| 003 | 单机画布与 AI 对战    | 固定 MiniMax-M3 + 两步 AI 画 + 多次猜测已实现；计分/降级/测试待完善       |
 | 004 | 联机画布同步 + 排行榜 | 代码存在（dev-pqx 遗留），本分支未验证                                      |
 | 005 | 用户系统              | **已实现并验证**：注册/登录/JWT + 资料编辑/改密/注销/公开查询 + WS 认证修复 |
 
@@ -401,7 +401,7 @@ Web (AdminPage / AdminService，Authorization: Bearer <admin JWT>)
 
 ## 10. 未实现 / 未开始
 
-- **故事模式**：仅首页禁用占位按钮；`API_ROUTES.AI.GENERATE_STORY`/`EVALUATE_DRAWING` 常量存在但 ai-service 无端点。
+- **故事模式**：Web 三主题三章节流程、NestJS 进度管理、AI/降级评价与分支结局均已实现。
 - **数据库持久化**：用户/房间/排行榜全内存 Map，重启即丢。
 - **小程序端功能**：仅脚手架。
 - 游客登录 REST 端点、ai_draws 后端猜词校验、全局错误边界、ai-service 鉴权与测试。
@@ -415,8 +415,8 @@ Web (AdminPage / AdminService，Authorization: Bearer <admin JWT>)
 
 | 项                 | DEV_GUIDE（main）        | dev-xj 实际                                                                                               |
 | ------------------ | ------------------------ | --------------------------------------------------------------------------------------------------------- |
-| 单机 AI provider   | mock（随机/成功率）      | 双 provider：qwen（千问 flash）/ minimax（MiniMax-M3），可切换                                            |
-| 模型选择           | 无                       | 单机入口「选择 AI 画家」页（`PROVIDER_LEVELS`）                                                           |
+| 单机 AI provider   | mock（随机/成功率）      | 固定 minimax（MiniMax-M3）                                                                                 |
+| 模型选择           | 无                       | 不展示选择页，选完难度直接开始                                                                             |
 | ai-service         | 仅 `/health`、`/info` 桩 | 完整 recognize + generate-drawing（按 provider 分支）                                                     |
 | AI画我猜流程       | 文档称"未实现"           | 两步生成（绘画提示词 → 笔画），代码已实现                                                                 |
 | 猜词交互           | 猜一次即结算             | 最多 3 次（`MAX_GUESSES`），记录历史+线索                                                                 |

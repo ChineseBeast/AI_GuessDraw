@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { useAuth } from '../../hooks/useAuth';
+import { useAuth, type User } from '../../hooks/useAuth';
 
 interface RegisterPageProps {
-  onRegisterSuccess: () => void;
+  onRegisterSuccess: (user: User) => void;
   onNavigateToLogin: () => void;
 }
 
@@ -43,8 +43,8 @@ export const RegisterPage: React.FC<RegisterPageProps> = ({ onRegisterSuccess, o
     }
 
     try {
-      await register(username.trim(), password, email || undefined);
-      onRegisterSuccess();
+      const result = await register(username.trim(), password, email || undefined);
+      onRegisterSuccess(result.user);
     } catch {
       // error handled by useAuth
     }

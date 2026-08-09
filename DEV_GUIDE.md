@@ -4,7 +4,7 @@
 
 **你画我猜 AI（Draw & Guess AI）** — AI 驱动的你画我猜游戏，支持单机、联机、故事三种模式。当前版本 v0.4.1。
 
-仓库：`github.com:ChineseBeast/AI_GuessDraw.git`。当前开发分支 `dev-xj`（双 AI provider + 用户管理模块）；`main` 为稳定分支。
+仓库：`github.com:ChineseBeast/AI_GuessDraw.git`。当前故事模式开发分支 `dev-gd`；前端固定使用 MiniMax-M3，`main` 为稳定分支。
 
 > ⚠️ 本文档已按 `dev-xj` 实际源码校对。更详细的审计结论与已知问题清单见 [`HANDOVER.md`](./HANDOVER.md)（两者一致，以 HANDOVER 为权威）。
 
@@ -144,7 +144,7 @@ Implement                      →  编码
 
 ## 当前实现状态
 
-### 单机模式（5 轮制，双 AI provider 可切换）
+### 单机模式（5 轮制，固定 MiniMax-M3）
 
 流程：选难度 → **选 AI 画家（MiniMax / 千问）** → 画布绘画 → 提交 → AI 识别猜词 → 轮换角色（`user_draws`/`ai_draws` 按轮次奇偶交替）→ 计分结算 → 5 轮决胜负。
 
@@ -255,7 +255,7 @@ WebSocket 房间系统：创建/加入/离开房间、画布实时同步、猜�
 
 ### 未实现
 
-- 故事模式（Spec 中有规划，未开始）
+- 故事模式（三主题、三章节、AI/降级评价与分支结局已实现）
 - 小程序端功能（仅脚手架）
 - SQLite/PostgreSQL 数据库迁移（当前用文件持久化兜底）
 
@@ -438,7 +438,7 @@ uv pip install fastapi "uvicorn[standard]" pydantic httpx python-dotenv Pillow
 
 当前状态（分支 `dev-xj`）：
 
-- **双 AI provider（可切换）**：单机模式入口选完难度后弹「选择 AI 画家」页，选 `qwen`（通义千问 `qwen3.7-flash`，OpenAI 兼容端点）或 `minimax`（MiniMax `MiniMax-M3`，Anthropic 协议端点）。provider 从前端 web → server → ai-service 全链路透传
+- **固定 MiniMax-M3**：单机模式选完难度后直接开始，不再展示「选择 AI 画家」页；前端以 `provider=minimax` 通过 web → server → ai-service 全链路透传。
 - **我画AI猜（user_draws）**：Canvas 提交 → `AIService.recognize` → server 转发 → ai-service 按 provider 调模型识别
 - **AI画我猜（ai_draws）代码已实现**：`draw_service` **两步生成**——先按 `DRAW_PROMPT_TEMPLATE` 让模型生成绘画提示词（提炼 3 个视觉特征），再据提示词输出笔画 JSON。笔画数按难度区分（easy 5-10 / medium 8-15 / hard 12-25 笔）；模型失败/超时走 `_fallback_strokes` 兜底。**需配 key 后实测效果**
 - **多次猜测**：ai_draws 回合最多猜 3 次（`MAX_GUESSES`），猜错记录到 `userGuesses`、给字数+首字线索、继续猜；猜对或用完次数结算。猜对有绿色闪烁动画
@@ -451,7 +451,7 @@ uv pip install fastapi "uvicorn[standard]" pydantic httpx python-dotenv Pillow
   - 回合结束原因支持 `all_guessed` / `timeout` / `drawer_submitted`
 - **运行配置**：`apps/ai-service/.env` 需自配 `MINIMAX_API_KEY` 与 `MINIMAX_ANTHROPIC_API_KEY`（MiniMax 官方 `sk-api-*` 密钥）；`apps/server/.env` 配 `AI_SERVICE_URL=http://localhost:8000`；Python 环境用 uv 安装 3.11（无 root 场景）
 - 超时：ai-service 识别 90s / 绘画两步各 30s+60s 总超时；server 转发 105s；超时兜底简笔画保证链路不断
-- 故事模式 / 小程序端功能未开始
+- 故事模式 Web 端已完成；小程序端故事功能未开始
 
 关键类型（`packages/shared/src/types/`）：
 

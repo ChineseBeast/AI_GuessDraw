@@ -45,11 +45,16 @@ export class GameEngineService {
   }
 
   /** 开始新轮次 */
-  startRound(game: GameState, wordService: WordService): RoundState {
+  startRound(
+    game: GameState,
+    wordService: WordService,
+    roundDurationMs: number = ROUND_DURATION,
+    onTimeout?: (game: GameState, round: RoundState) => void,
+  ): RoundState {
     game.currentRound++;
     game.status = 'playing';
 
-    const drawerId = game.drawerOrder[game.currentDrawerIndex];
+    const drawerId = game.drawerOrder[game.currentDrawerIndex % game.drawerOrder.length];
     const word = game.wordPool[game.currentRound - 1] || wordService.getRandomWord('medium');
 
     const round: RoundState = {
@@ -61,12 +66,15 @@ export class GameEngineService {
       guesses: [],
       strokes: [],
       status: 'active',
+      durationMs: roundDurationMs,
     };
 
-    // 设置 60 秒超时
+    // 设置超时（AI 绘画轮次由调用方传入更长的时长）；
+    // onTimeout 由调用方（gateway）传入，用于广播轮次结束并推进下一轮
     round.timerHandle = setTimeout(() => {
       this.endRound(game, round, 'timeout');
-    }, ROUND_DURATION);
+      onTimeout?.(game, round);
+    }, roundDurationMs);
 
     game.rounds.push(round);
     return round;
@@ -129,6 +137,51 @@ export class GameEngineService {
     return { guess, guesserRank, allGuessed };
   }
 
+  /**
+   * 处理 AI 玩家猜词（联机模式）。
+   * 与 processGuess 完全一致（计分/排名/全员猜对判定），
+   * 区别仅在于正确性判定：AI 必须精确匹配目标词，不做模糊匹配。
+   */
+  processAIGuess(
+    game: GameState,
+    round: RoundState,
+    playerId: string,
+    guessText: string,
+  ): { guess: GuessRecord; guesserRank: number | null; allGuessed: boolean } {
+    const isCorrect = guessText.trim() === round.targetWord;
+    const proximity: GuessRecord['proximity'] = isCorrect ? 'exact' : 'wrong';
+
+    let score = 0;
+    let guesserRank: number | null = null;
+
+    if (isCorrect) {
+      // 计算排名和分数
+      const correctCount = round.guesses.filter(g => g.isCorrect).length;
+      guesserRank = correctCount + 1;
+
+      if (guesserRank === 1) score = SCORE_RULES.multiplayer.firstCorrect;
+      else if (guesserRank === 2) score = SCORE_RULES.multiplayer.secondCorrect;
+      else if (guesserRank === 3) score = SCORE_RULES.multiplayer.thirdCorrect;
+      else score = 1; // 第4个及之后猜对得 1 分
+    }
+
+    const guess: GuessRecord = {
+      playerId,
+      text: guessText,
+      isCorrect,
+      proximity,
+      score,
+      submittedAt: new Date(),
+    };
+
+    round.guesses.push(guess);
+
+    // 检查是否所有非绘画者都猜对了
+    const allGuessed = this.checkAllGuessed(game, round);
+
+    return { guess, guesserRank, allGuessed };
+  }
+
   /** 计算绘画者得分 */
   calculateDrawerScore(round: RoundState): number {
     const correctGuesses = round.guesses.filter(g => g.isCorrect).length;
@@ -139,7 +192,7 @@ export class GameEngineService {
   advanceToNextRound(game: GameState): boolean {
     game.currentDrawerIndex++;
 
-    if (game.currentDrawerIndex >= game.drawerOrder.length || game.currentRound >= game.totalRounds) {
+    if (game.currentRound >= game.totalRounds) {
       game.status = 'game_end';
       return false; // 游戏结束
     }
@@ -192,16 +245,18 @@ export class GameEngineService {
   }
 
   /** 切换绘画者（用于断线场景） */
-  switchDrawer(game: GameState, round: RoundState, newDrawerId: string): void {
+  switchDrawer(game: GameState, round: RoundState, newDrawerId: string, onTimeout?: (game: GameState, round: RoundState) => void): void {
     round.drawerId = newDrawerId;
 
     // 延长计时器
     if (round.timerHandle) {
       clearTimeout(round.timerHandle);
     }
+    round.durationMs = ROUND_DURATION + DRAWER_DISCONNECT_EXTRA_TIME;
     round.timerHandle = setTimeout(() => {
       this.endRound(game, round, 'timeout');
-    }, ROUND_DURATION + DRAWER_DISCONNECT_EXTRA_TIME);
+      onTimeout?.(game, round);
+    }, round.durationMs);
   }
 
   /** 清理游戏 */

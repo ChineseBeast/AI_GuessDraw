@@ -33,12 +33,17 @@ export const PlayerList: React.FC<PlayerListProps> = ({ players, currentUserId, 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             {/* 角色图标 */}
             <span style={{ fontSize: '0.9rem' }}>
-              {player.role === 'drawer' ? '🎨' : player.role === 'spectator' ? '👀' : '🔍'}
+              {player.isAI ? '🤖' : player.role === 'drawer' ? '🎨' : player.role === 'spectator' ? '👀' : '🔍'}
             </span>
 
             {/* 昵称 */}
             <span>
               {player.nickname}
+              {player.isAI && (
+                <span style={{ fontSize: '0.7rem', background: '#ede7f6', color: '#5e35b1', borderRadius: '4px', padding: '0 0.3rem', marginLeft: '0.2rem' }}>
+                  AI
+                </span>
+              )}
               {player.userId === hostId && ' 👑'}
               {player.userId === currentUserId && ' (你)'}
             </span>

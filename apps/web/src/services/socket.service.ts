@@ -68,6 +68,7 @@ export class SocketService {
       'player_disconnected', 'player_reconnected', 'host_changed',
       'game_started', 'round_started', 'canvas_sync', 'guess_result',
       'correct_guess', 'round_ended', 'game_ended', 'error',
+      'ai_status', 'ai_guess', 'drawer_finished',
     ];
 
     for (const event of events) {
@@ -119,6 +120,14 @@ export class SocketService {
 
   submitGuess(payload: SubmitGuessPayload): void {
     this.socket?.emit('submit_guess', payload);
+  }
+
+  finishDrawing(): void {
+    this.socket?.emit('finish_drawing');
+  }
+
+  acceptJoinNextGame(): void {
+    this.socket?.emit('accept_join_next_game');
   }
 
   reconnect(payload: ReconnectPayload): void {

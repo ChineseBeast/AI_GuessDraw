@@ -5,7 +5,9 @@
 """
 
 import asyncio
+import base64
 import hashlib
+import io
 import json
 import logging
 import math
@@ -13,9 +15,10 @@ import re
 from typing import Any
 
 import httpx
+from PIL import Image, ImageDraw
 
 from src.config import settings
-from src.schemas import AIDrawPoint, AIDrawStroke
+from src.schemas import AIDrawPoint, AIDrawStroke, RecognizeStroke
 
 logger = logging.getLogger("ai_service.draw")
 
@@ -23,20 +26,28 @@ logger = logging.getLogger("ai_service.draw")
 CANVAS_WIDTH = 800
 CANVAS_HEIGHT = 600
 
-DRAW_PROMPT = f"""你是"你画我猜"游戏的 AI 画家，擅长画可辨识的简笔画。前端在 {CANVAS_WIDTH}x{CANVAS_HEIGHT} 画布上重现你的笔画。
+DRAW_PROMPT = f"""你是“你画我猜”游戏的简笔画轨迹设计师。请把给定的结构化构图方案转换成可直接绘制的笔画 JSON。
 
-画法要求：
-1. 先提炼该事物的 3 个最鲜明视觉特征，据此构图（如苹果=红色圆身+顶部果柄+一片叶子；鸟=尖嘴向上+侧身收拢翅膀+站在树枝上）
-2. 先在脑中分解视觉部件，每个部件用一条或多条笔画
-3. 用 {{stroke_count}} 条笔画，每条笔画 5~30 个点（点越密曲线越圆滑，画圆弧时多点才能画圆）
-4. 主体居中、大小适中（占画布 1/3~1/2），各部件比例正确、位置关系对
-5. 绘画风格统一：简洁线条 + 鲜明色彩，避免过多细节，让核心元素一目了然
-6. 若是名词画具有辨识度的物体；若是动作/动词，画出动作场景（如"跳舞"画一个舞姿的人）
-7. 画出来的图必须能让人一眼认出是什么——抓住该事物的标志性特征，特征明显且无歧义
-8. color 用十六进制（如 "#000000" 黑、"#E74C3C" 红、"#2D9A3E" 绿），width 3~5
+画布与构图规则：
+1. 画布为 {CANVAS_WIDTH}x{CANVAS_HEIGHT}，所有坐标必须在范围内；主体只能放在安全区域 x=60~740、y=50~550。
+2. 使用构图方案指定的典型视角。主体居中且醒目，其较长方向应占对应画布尺寸的 60%~75%，不能缩在中央，也不能碰到边缘。
+3. 严格保持部件的大小、方向、前后、上下、连接和对称关系。例如眼睛位于头部内，轮子连接车身下方，叶子连接果梗，左右成对部件大小和高度一致。
+4. 按“主体外轮廓 → 最大识别部件 → 次要识别部件 → 必要的内部线条/颜色”的顺序绘制。每一笔都必须对应构图方案里的主体或命名部件。
+5. 先用 #000000、宽度 4~5 的连续线条建立清楚轮廓，再使用最多 3 种符合真实语义的鲜明颜色强调关键部件；不要用颜色替代缺失的轮廓。
+6. 闭合轮廓的最后一个点必须与第一个点相同。圆、椭圆和弧线使用 10~24 个顺序平滑的点；直线使用 2~5 个点。禁止相互乱穿、无意义折返和散乱短线。
 
-只返回 JSON 数组，点用 [x,y] 数组，不要解释：
-[{{"points":[[400,300],[380,310]],"color":"#000000","width":4}}]"""
+准确性规则：
+7. 必须优先表现 silhouette 和 priority 为 1 的部件，再表现其他部件；宁可减少装饰，也不能遗漏最能区分目标的特征。
+8. 使用 {{stroke_count}} 条笔画。若特征较多，合并同一部件的连续线条，但不能把互不相连的部件硬连成一笔。
+9. 只画一个主要对象。除非构图方案明确说明动作必需，否则不要添加背景、地面线、边框、阴影、纹理、装饰或无关物体。
+10. 绝对不要写目标词、文字、字母、数字、标签、箭头、表情符号或任何可直接泄露答案的符号。
+11. 输出前自行检查：主体尺寸合适；每个关键部件存在且位置正确；闭合形状已闭合；笔画数符合要求；所有坐标均在画布内。
+
+输出协议：
+- 只返回一个合法 JSON 数组，不要 Markdown、解释、注释或思考过程。
+- 数组元素只能包含 points、color、width 三个字段。
+- points 必须是 [x,y] 数字数组，color 必须是 #RRGGBB，width 必须是 3~5。
+- 示例格式：[{{"points":[[400,120],[450,140]],"color":"#000000","width":4}}]"""
 
 # 不同难度的笔画复杂度：简单少笔画、困难多笔画
 _DIFFICULTY_STROKES = {
@@ -46,17 +57,73 @@ _DIFFICULTY_STROKES = {
 }
 
 # 第一步：生成「绘画提示词」的模板（用户指定）
-DRAW_PROMPT_TEMPLATE = """在接下来的对话中，每当您需要画一幅简笔画来帮助我猜词时，请按以下步骤自动操作：
-1. 为要画的词语提炼出 3 个最鲜明的视觉特征。
-2. 生成一个包含这些特征的绘画提示词，格式为：[提示词内容]。
-3. 提示词中需包含：主体描述、动作姿态、线条风格（清晰简洁）、背景（纯白）。
-4. 请确保提示词生成的图像对猜词有帮助，特征明显且无歧义。
-示例输出：绘画提示词：一只站在树枝上的鸟，侧身，尖嘴向上，翅膀收拢，黑色轮廓线，白色背景。
-现在，请按照此规则执行。"""
+DRAW_PROMPT_TEMPLATE = """你是“你画我猜”游戏的视觉构图规划师。你的任务不是写文艺描述，而是为目标词设计一幅最容易被普通玩家认出的简笔画。
+
+规划规则：
+1. 先确定目标最常见、最无歧义的含义，选择大众最熟悉的典型外形和典型视角；不要采用罕见含义、拟人化造型或艺术化变形。
+2. 只安排一个大而居中的主体。主体应占画布主要区域，轮廓必须在没有颜色和细节时仍可辨认。
+3. 找出 3~5 个真正具有区分度的视觉部件，并明确每个部件的简单几何形状、相对大小、绝对方位以及与其他部件的连接/包含/对称关系。
+4. priority=1 表示缺少后会认错的核心特征；priority=2 表示辅助特征。不要把普通装饰当作核心特征。
+5. 名词画对象本身；动物或交通工具优先使用能展示最多特征的侧面或四分之三视角；人物动作要用清楚的四肢姿态表现动作。
+6. 配色遵循真实世界的典型颜色，最多 3 种主体色，黑色轮廓不计入。颜色只用于增强识别，不能依赖复杂填充。
+7. avoid 必须列出容易与目标混淆的造型，以及文字、标签、箭头、装饰背景和无关物体。除动作语义必需外，不规划第二个对象。
+
+只返回一个合法 JSON 对象，不要 Markdown、解释或思考过程，字段必须完整：
+{
+  "subject": "目标对象的明确名称",
+  "view": "正面/侧面/俯视/四分之三视角及朝向",
+  "silhouette": "一句话描述主体整体轮廓、长宽比例与显著凸出部分",
+  "composition": "主体中心位置、占画布比例和姿态",
+  "parts": [
+    {
+      "name": "部件名",
+      "shape": "可用线条表达的简单形状和相对大小",
+      "position": "相对主体的准确方位",
+      "relation": "与主体或其他部件的连接、包含、遮挡或对称关系",
+      "color": "典型十六进制颜色",
+      "priority": 1
+    }
+  ],
+  "palette": ["#RRGGBB"],
+  "avoid": ["禁止出现的混淆造型或干扰元素"]
+}"""
 
 
 class DrawError(Exception):
     """AI 绘画生成过程中的异常。"""
+
+
+def strokes_to_png_base64(strokes: list[RecognizeStroke]) -> str:
+    """把画布同步笔画渲染成 800x600 白底 PNG，返回原始 base64（无 data URI 前缀）。
+
+    用于联机模式 AI 猜词：画者在画布上的笔画（draw/erase）经过顺序还原
+    （undo 移除上一笔、clear 清空）后渲染为图片，再交给多模态模型识别。
+    """
+    # 顺序还原画布状态：undo 弹出上一笔、clear 清空（与前端画布行为一致）
+    active: list[RecognizeStroke] = []
+    for stroke in strokes:
+        if stroke.type == "clear":
+            active.clear()
+        elif stroke.type == "undo":
+            if active:
+                active.pop()
+        else:
+            active.append(stroke)
+
+    img = Image.new("RGB", (CANVAS_WIDTH, CANVAS_HEIGHT), "white")
+    draw = ImageDraw.Draw(img)
+    for stroke in active:
+        pts = [(p.x, p.y) for p in stroke.points]
+        if len(pts) < 2:
+            continue
+        # erase 笔画以白色绘制，模拟橡皮擦除效果
+        color = "#ffffff" if stroke.type == "erase" else (stroke.color or "#000000")
+        width = max(1, min(int(stroke.width or 4), 20))
+        draw.line(pts, fill=color, width=width, joint="curve")
+
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
 def _strip_code_fence(content: str) -> str:
@@ -246,9 +313,9 @@ async def _send_text_request(
 
 
 async def _generate_draw_prompt(target_word: str, provider: str) -> str:
-    """第一步：按模板让模型为词语生成「绘画提示词」（描述主体/动作/线条/背景的文字）。"""
-    prompt = f"{DRAW_PROMPT_TEMPLATE}\n\n请为「{target_word}」生成绘画提示词。"
-    text = await _send_text_request(prompt, provider, max_tokens=512, timeout=30.0)
+    """第一步：让模型为目标词生成结构化视觉构图方案。"""
+    prompt = f"{DRAW_PROMPT_TEMPLATE}\n\n目标词：{target_word}\n请严格按上述 JSON 结构生成构图方案。"
+    text = await _send_text_request(prompt, provider, max_tokens=1024, timeout=30.0)
     if not text:
         logger.warning("生成绘画提示词失败，走兜底直接画")
     return text
@@ -259,18 +326,22 @@ async def _call_model(
 ) -> list[AIDrawStroke]:
     """两步生成笔画轨迹，返回解析到的笔画（失败返回空列表，由调用方决定兜底）。
 
-    第一步：生成绘画提示词（描述主体/动作/线条）；第二步：据提示词输出笔画 JSON。
+    第一步：生成结构化视觉构图方案；第二步：据构图方案输出笔画 JSON。
     `difficulty` 控制笔画复杂度（easy 5-10 / medium 8-15 / hard 12-25 笔）。
     `provider`："qwen" 走 OpenAI 兼容端点，"minimax" 走 Anthropic 协议端点。
     """
-    # 第一步：生成绘画提示词（30s 超时，保证两步合计 < server 105s 超时）
+    # 第一步：生成结构化构图方案（30s 超时，保证两步合计 < server 105s 超时）
     draw_prompt_text = await _generate_draw_prompt(target_word, provider)
 
     # 第二步：据提示词输出笔画
     stroke_count = _DIFFICULTY_STROKES.get(difficulty, "5~10")
     prompt = DRAW_PROMPT.replace("{stroke_count}", stroke_count)
     if draw_prompt_text:
-        full_prompt = f"{prompt}\n\n绘画提示词：{draw_prompt_text}\n\n请严格按此提示词画「{target_word}」的简笔画。"
+        full_prompt = (
+            f"{prompt}\n\n目标词：{target_word}\n"
+            f"结构化构图方案：\n{draw_prompt_text}\n\n"
+            "请严格依照该方案生成简笔画轨迹，并在输出前完成规则自检。"
+        )
     else:
         # 提示词生成失败，退化为直接画
         full_prompt = f"{prompt}\n\n请画：「{target_word}」"

@@ -31,7 +31,7 @@ export const API_ROUTES = {
   },
   // 故事
   STORY: {
-    LIST: '/api/v1/stories',
+    START: '/api/v1/stories/start',
     CHAPTER: '/api/v1/stories/:id/chapters/:chapter',
     SUBMIT: '/api/v1/stories/:id/chapters/:chapter/submit',
     PROGRESS: '/api/v1/stories/:id/progress',

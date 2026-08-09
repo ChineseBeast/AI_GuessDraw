@@ -5,6 +5,8 @@ import type { Difficulty, RoomStatus, GameStatus, PlayerRole, ConnectionStatus, 
 export interface CreateRoomPayload {
   maxPlayers: number;
   difficulty: Difficulty;
+  /** 是否允许 AI 作为玩家参与游戏（房主设置） */
+  allowAI?: boolean;
 }
 
 export interface JoinRoomPayload {
@@ -63,6 +65,8 @@ export interface PlayerInfo {
   role: PlayerRole;
   score: number;
   connectionStatus: ConnectionStatus;
+  /** 是否为 AI 玩家 */
+  isAI?: boolean;
 }
 
 export interface PlayerJoinedEvent {
@@ -105,6 +109,7 @@ export interface GameStartedEvent {
 
 export interface RoundStartedForDrawer {
   roundNumber: number;
+  drawerId: string;
   targetWord: string;
   difficulty: string;
   timeLimit: number;
@@ -112,6 +117,7 @@ export interface RoundStartedForDrawer {
 
 export interface RoundStartedForGuessers {
   roundNumber: number;
+  drawerId: string;
   wordLength: number;
   wordHint: string;
   timeLimit: number;
@@ -156,6 +162,24 @@ export interface RoundEndedEvent {
   nextDrawerId?: string;
 }
 
+export interface DrawerFinishedEvent {
+  drawerId: string;
+}
+
+/** AI 玩家状态变化（绘画中/绘画完成/猜词中） */
+export interface AIStatusEvent {
+  playerId: string;
+  status: 'drawing' | 'draw_done' | 'thinking';
+}
+
+/** AI 玩家的猜词结果（广播给所有玩家） */
+export interface AIGuessEvent {
+  playerId: string;
+  guesses: { word: string; confidence: number }[];
+  isCorrect: boolean;
+  matchedWord?: string;
+}
+
 export interface GameEndedEvent {
   finalScores: {
     playerId: string;
@@ -190,6 +214,8 @@ export interface RoomPlayer {
   joinedAt: Date;
   socketId: string;
   sessionToken: string;
+  /** 是否为 AI 玩家（无 socket，由服务端驱动行为） */
+  isAI?: boolean;
 }
 
 export interface Room {
@@ -199,6 +225,8 @@ export interface Room {
   status: RoomStatus;
   maxPlayers: number;
   difficulty: Difficulty;
+  /** 是否允许 AI 玩家参与（创建房间时由房主决定） */
+  allowAI: boolean;
   createdAt: Date;
   players: Map<string, RoomPlayer>;
   spectators: Map<string, RoomPlayer>;
@@ -227,6 +255,8 @@ export interface RoundState {
   guesses: GuessRecord[];
   strokes: CanvasSyncEvent[];
   status: 'active' | 'completed';
+  /** 本轮时长（ms，AI 绘画轮次会延长） */
+  durationMs: number;
   timerHandle?: ReturnType<typeof setTimeout>;
 }
 

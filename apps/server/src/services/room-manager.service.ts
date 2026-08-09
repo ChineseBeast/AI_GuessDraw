@@ -3,6 +3,7 @@ import { customAlphabet } from 'nanoid';
 import type { Difficulty } from '@draw-guess/shared';
 import { INVITE_CODE_ALPHABET, INVITE_CODE_LENGTH, ROOM_CLEANUP_TIMEOUT } from '@draw-guess/shared';
 import type { Room, RoomPlayer } from '../types/websocket.types';
+import { AI_PLAYER_ID, AI_PLAYER_NICKNAME } from './ai-player.service';
 
 const generateInviteCode = customAlphabet(INVITE_CODE_ALPHABET, INVITE_CODE_LENGTH);
 
@@ -13,7 +14,13 @@ export class RoomManagerService {
   private cleanupTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** 创建房间 */
-  createRoom(hostId: string, hostNickname: string, maxPlayers: number, difficulty: Difficulty): Room {
+  createRoom(
+    hostId: string,
+    hostNickname: string,
+    maxPlayers: number,
+    difficulty: Difficulty,
+    allowAI: boolean = false,
+  ): Room {
     const id = this.generateRoomId();
     const inviteCode = this.generateUniqueInviteCode();
 
@@ -28,6 +35,24 @@ export class RoomManagerService {
       sessionToken: this.generateSessionToken(hostId, id),
     };
 
+    const players = new Map<string, RoomPlayer>([[hostId, hostPlayer]]);
+
+    // 房主开启 AI 参与：注入一名 AI 玩家（占一个玩家位，参与画者轮换与计分）
+    if (allowAI) {
+      const aiPlayer: RoomPlayer = {
+        userId: AI_PLAYER_ID,
+        nickname: AI_PLAYER_NICKNAME,
+        role: 'guesser',
+        score: 0,
+        connectionStatus: 'connected',
+        joinedAt: new Date(),
+        socketId: '',
+        sessionToken: `ai_${id}`,
+        isAI: true,
+      };
+      players.set(AI_PLAYER_ID, aiPlayer);
+    }
+
     const room: Room = {
       id,
       inviteCode,
@@ -35,8 +60,9 @@ export class RoomManagerService {
       status: 'waiting',
       maxPlayers,
       difficulty,
+      allowAI,
       createdAt: new Date(),
-      players: new Map([[hostId, hostPlayer]]),
+      players,
       spectators: new Map(),
     };
 

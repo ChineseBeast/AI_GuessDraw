@@ -3,10 +3,17 @@ import { WebSocketGateway, WebSocketServer, SubscribeMessage, ConnectedSocket, M
 import type { Server, Socket } from 'socket.io';
 import { Injectable, Logger } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import { COUNTDOWN_DURATION, ROUND_RESULT_DURATION, MAX_RECONNECT_TIME } from '@draw-guess/shared';
+import { COUNTDOWN_DURATION, ROUND_RESULT_DURATION, MAX_RECONNECT_TIME, ROUND_DURATION } from '@draw-guess/shared';
 import { RoomManagerService } from '../services/room-manager.service';
 import { GameEngineService } from '../services/game-engine.service';
 import { WordService } from '../services/word.service';
+import {
+  AIPlayerService,
+  AI_PLAYER_ID,
+  AI_PLAYER_NICKNAME,
+  AI_GUESS_INTERVAL_MS,
+  AI_DRAW_EXTRA_MS,
+} from '../services/ai-player.service';
 import type { JwtPayload } from '../modules/auth/auth.types';
 import type {
   CreateRoomPayload,
@@ -31,6 +38,9 @@ import type {
   RoundEndedEvent,
   GameEndedEvent,
   ErrorEvent,
+  AIStatusEvent,
+  AIGuessEvent,
+  DrawerFinishedEvent,
 } from '../types/websocket.types';
 
 @Injectable()
@@ -45,12 +55,18 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(RoomGateway.name);
   private disconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private socketToUser = new Map<string, { userId: string; roomId: string }>();
+  /** AI 猜词循环状态：roomId → 循环上下文（每轮重建，防止旧循环残留） */
+  private aiGuessLoops = new Map<
+    string,
+    { timer: ReturnType<typeof setTimeout> | null; inFlight: boolean; lastAttemptAt: number }
+  >();
 
   constructor(
     private readonly roomManager: RoomManagerService,
     private readonly gameEngine: GameEngineService,
     private readonly wordService: WordService,
     private readonly jwtService: JwtService,
+    private readonly aiPlayerService: AIPlayerService,
   ) {}
 
   // ─── Lifecycle ───────────────────────────────────
@@ -136,7 +152,13 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
-      const room = this.roomManager.createRoom(userId, nickname, payload.maxPlayers, payload.difficulty || 'medium');
+      const room = this.roomManager.createRoom(
+        userId,
+        nickname,
+        payload.maxPlayers,
+        payload.difficulty || 'medium',
+        payload.allowAI,
+      );
 
       // 更新房主的 socketId
       this.roomManager.updatePlayerSocket(room.id, userId, client.id);
@@ -342,6 +364,16 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     // 验证是绘画者
     if (round.drawerId !== userId) return;
 
+    const room = this.roomManager.findById(roomId);
+
+    // AI 参与的房间：提交绘画后本轮继续，给 AI（及其他人）猜词时间，直到超时或全员猜对
+    if (room?.allowAI && room.players.has(AI_PLAYER_ID)) {
+      const event: DrawerFinishedEvent = { drawerId: userId };
+      this.server.to(roomId).emit('drawer_finished', event);
+      this.logger.log(`Drawer ${userId} submitted drawing in AI room ${roomId}, round continues`);
+      return;
+    }
+
     // 结束当前轮次
     this.gameEngine.endRound(game, round, 'drawer_submitted');
     this.broadcastRoundEnd(roomId);
@@ -458,7 +490,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
           targetWord: isDrawer ? round.targetWord : undefined,
           wordLength: isDrawer ? undefined : round.targetWord.length,
           wordHint: isDrawer ? undefined : '_'.repeat(round.targetWord.length),
-          timeLimit: 60,
+          timeLimit: Math.round((round.durationMs || 60_000) / 1000),
           scores: this.getCurrentScores(room.id),
           correctGuessers: round.guesses
             .filter((g) => g.isCorrect)
@@ -574,8 +606,20 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const room = this.roomManager.findById(roomId);
     if (!room) return;
 
-    const round = this.gameEngine.startRound(game, this.wordService);
-    // drawer will be used for role assignment below
+    // 本轮绘画者是否为 AI（AI 绘画需要先生成笔画，延长本轮时长）
+    const drawerId = game.drawerOrder[game.currentDrawerIndex % game.drawerOrder.length];
+    const isAIDrawer = drawerId === AI_PLAYER_ID;
+    const roundDurationMs = isAIDrawer ? ROUND_DURATION + AI_DRAW_EXTRA_MS : ROUND_DURATION;
+
+    const round = this.gameEngine.startRound(game, this.wordService, roundDurationMs, () => {
+      // 超时结束：广播轮次结果并推进（AI 房画者提交后轮次继续，超时是常见结束路径）
+      this.broadcastRoundEnd(roomId);
+    });
+
+    // 同步玩家角色（画者/猜词者），供玩家列表展示
+    for (const player of room.players.values()) {
+      player.role = player.userId === round.drawerId ? 'drawer' : 'guesser';
+    }
 
     // 发给每个玩家（使用 server.to(socketId) 避免访问 server.sockets.sockets）
     const socketIds = this.roomManager.getAllSocketIds(room);
@@ -586,20 +630,201 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       if (mapping.userId === round.drawerId) {
         const event: RoundStartedForDrawer = {
           roundNumber: round.roundNumber,
+          drawerId: round.drawerId,
           targetWord: round.targetWord,
           difficulty: round.wordDifficulty,
-          timeLimit: 60,
+          timeLimit: Math.round(round.durationMs / 1000),
         };
         this.server.to(socketId).emit('round_started', event);
       } else {
         const event: RoundStartedForGuessers = {
           roundNumber: round.roundNumber,
+          drawerId: round.drawerId,
           wordLength: round.targetWord.length,
           wordHint: '_'.repeat(round.targetWord.length),
-          timeLimit: 60,
+          timeLimit: Math.round(round.durationMs / 1000),
         };
         this.server.to(socketId).emit('round_started', event);
       }
+    }
+
+    // AI 参与：本轮为 AI 作画则驱动 AI 生成笔画，否则（AI 是猜者）启动 AI 猜词循环
+    if (room.allowAI && room.players.has(AI_PLAYER_ID)) {
+      if (isAIDrawer) {
+        this.kickoffAIDrawing(roomId);
+      } else {
+        this.startAIGuessLoop(roomId);
+      }
+    }
+  }
+
+  /**
+   * AI 作为画者：调用 ai-service 生成笔画轨迹，并以 canvas_sync 事件广播给所有玩家。
+   * 生成失败（AI 服务不可用）时按超时结束本轮。
+   */
+  private kickoffAIDrawing(roomId: string): void {
+    const game = this.gameEngine.getGame(roomId);
+    const round = game?.rounds[game.currentRound - 1];
+    if (!game || !round || round.status !== 'active' || round.drawerId !== AI_PLAYER_ID) return;
+
+    const statusEvent: AIStatusEvent = { playerId: AI_PLAYER_ID, status: 'drawing' };
+    this.server.to(roomId).emit('ai_status', statusEvent);
+    this.logger.log(`AI drawing round ${round.roundNumber} started in room ${roomId}`);
+
+    this.aiPlayerService
+      .generateStrokes(round.targetWord, round.wordDifficulty)
+      .then((strokes) => {
+        // 轮次可能已结束/切换，丢弃过期结果
+        const current = this.gameEngine.getGame(roomId);
+        const currentRound = current?.rounds[current.currentRound - 1];
+        if (!current || !currentRound || currentRound !== round || currentRound.status !== 'active') return;
+
+        for (const stroke of strokes) {
+          const syncEvent: CanvasSyncEvent = {
+            sequenceNumber: currentRound.strokes.length + 1,
+            type: 'draw',
+            brush: { color: stroke.color, size: stroke.width, opacity: 1 },
+            points: stroke.points,
+            timestamp: Date.now(),
+          };
+          currentRound.strokes.push(syncEvent);
+          this.server.to(roomId).emit('canvas_sync', syncEvent);
+        }
+
+        const doneEvent: AIStatusEvent = { playerId: AI_PLAYER_ID, status: 'draw_done' };
+        this.server.to(roomId).emit('ai_status', doneEvent);
+        this.logger.log(`AI finished drawing round ${round.roundNumber} in room ${roomId}`);
+      })
+      .catch(() => {
+        // AI 服务不可用：按超时结束本轮，避免卡住
+        const current = this.gameEngine.getGame(roomId);
+        const currentRound = current?.rounds[current.currentRound - 1];
+        if (!current || !currentRound || currentRound !== round || currentRound.status !== 'active') return;
+
+        this.logger.warn(`AI drawing failed in room ${roomId}, ending round ${round.roundNumber}`);
+        this.gameEngine.endRound(current, currentRound, 'timeout');
+        this.broadcastRoundEnd(roomId);
+      });
+  }
+
+  /**
+   * AI 作为猜者：启动猜词循环。每隔 AI_GUESS_INTERVAL_MS 检查一次画布是否有笔画，
+   * 有则调用 ai-service 识别并精确匹配目标词；猜对即停止，直到本轮结束。
+   * 两次猜测之间至少间隔 AI_GUESS_INTERVAL_MS。
+   */
+  private startAIGuessLoop(roomId: string): void {
+    // 重建循环上下文，使旧循环自然失效
+    this.stopAIGuessLoop(roomId);
+    const state = { timer: null as ReturnType<typeof setTimeout> | null, inFlight: false, lastAttemptAt: 0 };
+    this.aiGuessLoops.set(roomId, state);
+
+    const tick = async () => {
+      // 循环上下文已被替换（新一轮）或房间已结束 → 停止
+      if (this.aiGuessLoops.get(roomId) !== state) return;
+
+      const game = this.gameEngine.getGame(roomId);
+      const room = this.roomManager.findById(roomId);
+      if (!game || game.status !== 'playing' || !room || !room.players.has(AI_PLAYER_ID)) return;
+
+      const round = game.rounds[game.currentRound - 1];
+      if (!round || round.status !== 'active' || round.drawerId === AI_PLAYER_ID) return;
+      // AI 已猜对 → 停止（与人类玩家一致：猜对后不再处理）
+      if (round.guesses.some((g) => g.playerId === AI_PLAYER_ID && g.isCorrect)) return;
+
+      const now = Date.now();
+      const hasStrokes = round.strokes.some((s) => s.type === 'draw' || s.type === 'erase');
+      const intervalOk = now - state.lastAttemptAt >= AI_GUESS_INTERVAL_MS;
+
+      if (!hasStrokes || state.inFlight || !intervalOk) {
+        this.scheduleAIGuessTick(state, tick);
+        return;
+      }
+
+      state.inFlight = true;
+      state.lastAttemptAt = now;
+
+      try {
+        const guesses = await this.aiPlayerService.recognizeStrokes(
+          round.strokes,
+          round.targetWord,
+          round.wordDifficulty,
+        );
+
+        // 识别期间本轮可能已结束，丢弃过期结果
+        const current = this.gameEngine.getGame(roomId);
+        const currentRound = current?.rounds[current.currentRound - 1];
+        if (!current || !currentRound || currentRound !== round || currentRound.status !== 'active') return;
+
+        // 精确匹配：完全一致才算猜对（不采用模糊匹配）
+        const matched = guesses.find((g) => g.word.trim() === round.targetWord);
+
+        const aiGuessEvent: AIGuessEvent = {
+          playerId: AI_PLAYER_ID,
+          guesses: guesses.slice(0, 3),
+          isCorrect: matched !== undefined,
+          matchedWord: matched?.word,
+        };
+        this.server.to(roomId).emit('ai_guess', aiGuessEvent);
+
+        if (matched) {
+          const { guess, guesserRank, allGuessed } = this.gameEngine.processAIGuess(
+            current,
+            currentRound,
+            AI_PLAYER_ID,
+            matched.word,
+          );
+
+          if (guesserRank) {
+            const correctEvent: CorrectGuessEvent = {
+              playerId: AI_PLAYER_ID,
+              nickname: AI_PLAYER_NICKNAME,
+              rank: guesserRank,
+              score: guess.score,
+              guessersRemaining:
+                current.drawerOrder.filter((id) => id !== currentRound.drawerId).length -
+                currentRound.guesses.filter((g) => g.isCorrect).length,
+            };
+            this.server.to(roomId).emit('correct_guess', correctEvent);
+          }
+
+          this.logger.log(`AI guessed correctly in room ${roomId}: ${matched.word}`);
+
+          if (allGuessed) {
+            this.gameEngine.endRound(current, currentRound, 'all_guessed');
+            this.broadcastRoundEnd(roomId);
+            return;
+          }
+        }
+      } catch (error) {
+        this.logger.warn(`AI guess attempt failed in room ${roomId}: ${(error as Error).message}`);
+      } finally {
+        state.inFlight = false;
+      }
+
+      // 本轮仍在进行 → 间隔 AI_GUESS_INTERVAL_MS 后继续尝试
+      if (this.aiGuessLoops.get(roomId) === state) {
+        this.scheduleAIGuessTick(state, tick);
+      }
+    };
+
+    this.scheduleAIGuessTick(state, tick);
+    this.logger.log(`AI guess loop started in room ${roomId}`);
+  }
+
+  private scheduleAIGuessTick(
+    state: { timer: ReturnType<typeof setTimeout> | null },
+    tick: () => Promise<void>,
+  ): void {
+    state.timer = setTimeout(() => {
+      void tick();
+    }, AI_GUESS_INTERVAL_MS);
+  }
+
+  private stopAIGuessLoop(roomId: string): void {
+    const state = this.aiGuessLoops.get(roomId);
+    if (state) {
+      if (state.timer) clearTimeout(state.timer);
+      this.aiGuessLoops.delete(roomId);
     }
   }
 
@@ -642,8 +867,11 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
     scores[round.drawerId] = drawerScore;
 
-    const hasNext = game.currentRound < game.totalRounds && game.currentDrawerIndex + 1 < game.drawerOrder.length;
-    const nextDrawerId = hasNext ? game.drawerOrder[game.currentDrawerIndex + 1] : undefined;
+    // 轮次是否还有下一轮（以 totalRounds 为准，画者顺序循环复用）
+    const hasNext = game.currentRound < game.totalRounds;
+    const nextDrawerId = hasNext
+      ? game.drawerOrder[(game.currentDrawerIndex + 1) % game.drawerOrder.length]
+      : undefined;
 
     const event: RoundEndedEvent = {
       roundNumber: round.roundNumber,
@@ -712,6 +940,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     this.gameEngine.removeGame(roomId);
+    this.stopAIGuessLoop(roomId);
     this.logger.log(`Game ended in room ${room.inviteCode}`);
   }
 
@@ -731,7 +960,9 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const remainingPlayers = [...room.players.keys()].filter((id) => id !== userId);
         if (remainingPlayers.length > 0) {
           const newDrawer = remainingPlayers[Math.floor(Math.random() * remainingPlayers.length)];
-          this.gameEngine.switchDrawer(game, round, newDrawer);
+          this.gameEngine.switchDrawer(game, round, newDrawer, () => {
+            this.broadcastRoundEnd(roomId);
+          });
           this.server.to(roomId).emit('player_left', {
             playerId: userId,
             nickname: player.nickname,
@@ -811,7 +1042,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private mapPlayers(room: {
     players: Map<
       string,
-      { userId: string; nickname: string; avatarUrl?: string; role: string; score: number; connectionStatus: string }
+      { userId: string; nickname: string; avatarUrl?: string; role: string; score: number; connectionStatus: string; isAI?: boolean }
     >;
   }): PlayerInfo[] {
     return [...room.players.values()].map((p) => ({
@@ -821,6 +1052,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       role: p.role as PlayerInfo['role'],
       score: p.score,
       connectionStatus: p.connectionStatus as PlayerInfo['connectionStatus'],
+      isAI: p.isAI,
     }));
   }
 
@@ -831,6 +1063,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
     role: string;
     score: number;
     connectionStatus: string;
+    isAI?: boolean;
   }): PlayerInfo {
     return {
       userId: p.userId,
@@ -839,6 +1072,7 @@ export class RoomGateway implements OnGatewayConnection, OnGatewayDisconnect {
       role: p.role as PlayerInfo['role'],
       score: p.score,
       connectionStatus: p.connectionStatus as PlayerInfo['connectionStatus'],
+      isAI: p.isAI,
     };
   }
 }
